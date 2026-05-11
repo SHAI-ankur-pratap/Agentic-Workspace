@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JobAgent Dashboard</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0f2f5;color:#222;font-size:13px}
+a{color:#1976d2;text-decoration:none}
+a:hover{text-decoration:underline}
+
+.topbar{background:#0f2027;color:#fff;padding:12px 24px;display:flex;justify-content:space-between;align-items:center}
+.topbar h1{font-size:17px;font-weight:600}
+.topbar .meta{font-size:11px;color:#aaa}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#4caf50;margin-right:5px;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+.tabs{background:#fff;border-bottom:1px solid #e0e0e0;padding:0 24px;display:flex;gap:0;overflow-x:auto}
+.tab{padding:12px 18px;cursor:pointer;border-bottom:3px solid transparent;font-size:13px;color:#666;white-space:nowrap;user-select:none}
+.tab.active{border-bottom-color:#1976d2;color:#1976d2;font-weight:600}
+.tab:hover:not(.active){color:#333;background:#f8f8f8}
+.cnt{background:#f0f0f0;color:#555;padding:1px 7px;border-radius:10px;font-size:10px;margin-left:5px;font-weight:600}
+.cnt.green{background:#e8f5e9;color:#2e7d32}
+.cnt.orange{background:#fff3e0;color:#e65100}
+.cnt.red{background:#ffebee;color:#c62828}
+
+.content{padding:20px 24px;max-width:1000px}
+.tab-panel{display:none}.tab-panel.active{display:block}
+
+.stats{display:flex;gap:12px;margin-bottom:18px;flex-wrap:wrap}
+.stat{flex:1;min-width:120px;background:#fff;border-radius:8px;padding:14px 16px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.stat .num{font-size:26px;font-weight:700;line-height:1}
+.stat .lbl{font-size:11px;color:#888;margin-top:3px;text-transform:uppercase;letter-spacing:.4px}
+.stat.green .num{color:#2e7d32}.stat.orange .num{color:#e65100}
+.stat.red .num{color:#c62828}.stat.grey .num{color:#555}.stat.purple .num{color:#6a1b9a}
+
+.prog-wrap{margin-bottom:18px}
+.prog-bar{height:6px;background:#e0e0e0;border-radius:3px;overflow:hidden}
+.prog-fill{height:100%;background:linear-gradient(90deg,#1976d2,#42a5f5);border-radius:3px}
+.prog-label{font-size:11px;color:#888;margin-top:4px}
+
+.cycle-info{background:#fff;border-radius:7px;padding:11px 14px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,.07);font-size:12px;color:#555}
+
+.section-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:#999;margin-bottom:8px;margin-top:16px}
+
+.job-card{background:#fff;border-radius:7px;padding:11px 14px;margin-bottom:7px;box-shadow:0 1px 3px rgba(0,0,0,.07);border-left:4px solid #4caf50;display:flex;justify-content:space-between;align-items:center;gap:10px}
+.job-card.orange{border-left-color:#ff9800}
+.job-card.red{border-left-color:#f44336}
+.job-card.grey{border-left-color:#bdbdbd}
+.job-card.purple{border-left-color:#9c27b0}
+.job-card .left h4{font-size:13px;font-weight:600;margin-bottom:3px}
+.job-card .left h4 span{color:#888;font-weight:400}
+.job-card .meta{font-size:11px;color:#888;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+
+.badge{display:inline-block;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:600}
+.badge.li{background:#e3f2fd;color:#1565c0}
+.badge.nk{background:#fce4ec;color:#c62828}
+.badge.auto{background:#fff9c4;color:#8d6e00}
+.badge.pinned{background:#ede7f6;color:#4527a0}
+.badge.skipped{background:#f5f5f5;color:#757575}
+.badge.reason{background:#ffebee;color:#c62828}
+
+.pin-btn{background:#fff8e1;border:1px solid #ffc107;color:#e65100;border-radius:5px;padding:4px 10px;font-size:11px;cursor:pointer;white-space:nowrap;flex-shrink:0}
+.pin-btn:hover{background:#ffecb3}
+.unpin-btn{background:#fce4ec;border:1px solid #ef9a9a;color:#c62828;border-radius:5px;padding:4px 10px;font-size:11px;cursor:pointer;white-space:nowrap;flex-shrink:0}
+.unpin-btn:hover{background:#ffcdd2}
+
+.search-bar{background:#fff;border:1px solid #e0e0e0;border-radius:6px;padding:8px 12px;width:100%;margin-bottom:12px;font-size:13px;outline:none}
+.search-bar:focus{border-color:#1976d2}
+
+.info-banner{border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:12px}
+.info-banner.yellow{background:#fff8e1;border:1px solid #ffe082;color:#7b5800}
+.info-banner.red{background:#fce4ec;border:1px solid #f48fb1;color:#880e4f}
+.info-banner.grey{background:#f5f5f5;border:1px solid #e0e0e0;color:#555}
+
+.empty{text-align:center;color:#bbb;padding:40px;font-size:13px}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>🤖 JobAgent Dashboard</h1>
+  <div class="meta">
+    <span class="dot"></span>
+    {% if last_modified %}Last updated: {{ last_modified }}{% else %}No data yet{% endif %}
+  </div>
+</div>
+
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('overview',this)">📊 Overview</div>
+  <div class="tab" onclick="switchTab('applied',this)">✅ Applied <span class="cnt green">{{ stats.applied }}</span></div>
+  <div class="tab" onclick="switchTab('followup',this)">📋 Follow-up <span class="cnt orange">{{ stats.followup }}</span></div>
+  <div class="tab" onclick="switchTab('manual',this)">⚠️ Manual <span class="cnt red">{{ stats.manual }}</span></div>
+  <div class="tab" onclick="switchTab('skipped',this)">⏭ Skipped <span class="cnt">{{ stats.skipped }}</span></div>
+</div>
+
+<div class="content">
+
+  {# OVERVIEW #}
+  <div class="tab-panel active" id="tab-overview">
+    <div class="stats">
+      <div class="stat green"><div class="num">{{ stats.applied }}</div><div class="lbl">Applied</div></div>
+      <div class="stat orange"><div class="num">{{ stats.followup }}</div><div class="lbl">Follow-up</div></div>
+      <div class="stat red"><div class="num">{{ stats.failed }}</div><div class="lbl">Failed</div></div>
+      <div class="stat purple"><div class="num">{{ stats.manual }}</div><div class="lbl">Manual</div></div>
+      <div class="stat grey"><div class="num">{{ stats.skipped }}</div><div class="lbl">Skipped</div></div>
+      <div class="stat grey"><div class="num">{{ stats.total }}</div><div class="lbl">Total</div></div>
+    </div>
+    <div class="prog-wrap">
+      <div class="prog-bar"><div class="prog-fill" style="width:{{ stats.rate }}%"></div></div>
+      <div class="prog-label">Applied rate: {{ stats.rate }}% ({{ stats.applied }} of {{ stats.total }})</div>
+    </div>
+    {% if last_modified %}
+    <div class="cycle-info">🕒 <strong>Last updated:</strong> {{ last_modified }}</div>
+    {% endif %}
+    <div class="section-label">Recent Activity</div>
+    {% for job in recent %}
+      {% set s = job.status | lower %}
+      <div class="job-card {% if s == 'applied' %}{% elif 'skip' in s %}grey{% else %}red{% endif %}">
+        <div class="left">
+          <h4>{{ job.title }} <span>{% if job.company %}@ {{ job.company }}{% endif %}</span></h4>
+          <div class="meta">
+            <span class="badge {% if job.platform == 'linkedin' %}li{% else %}nk{% endif %}">
+              {{ job.platform | upper | truncate(2, True, '') }}
+            </span>
+            <span>{{ job.status }}</span>
+            {% if job.applied_at %}<span>{{ job.applied_at[:10] }}</span>{% endif %}
+            {% if job.url %}<a href="{{ job.url }}" target="_blank">View Job ↗</a>{% endif %}
+          </div>
+        </div>
+      </div>
+    {% else %}
+      <div class="empty">No activity yet. Start the daemon to begin applying.</div>
+    {% endfor %}
+  </div>
+
+  {# APPLIED #}
+  <div class="tab-panel" id="tab-applied">
+    <input class="search-bar" id="applied-search" placeholder="🔍  Search by title or company..." oninput="filterCards('applied-list', this.value)">
+    <div id="applied-list">
+    {% for job in applied %}
+      <div class="job-card" data-search="{{ job.title | lower }} {{ job.company | lower }}">
+        <div class="left">
+          <h4>{{ job.title }} <span>{% if job.company %}@ {{ job.company }}{% endif %}</span></h4>
+          <div class="meta">
+            <span class="badge {% if job.platform == 'linkedin' %}li{% else %}nk{% endif %}">{{ job.platform | upper | truncate(2, True, '') }}</span>
+            {% if job.applied_at %}<span>{{ job.applied_at[:10] }}</span>{% endif %}
+            {% if job.url %}<a href="{{ job.url }}" target="_blank">View Job ↗</a>{% endif %}
+          </div>
+        </div>
+        <form action="/pin/{{ job.id }}" method="post" style="margin:0">
+          <button class="pin-btn" type="submit">📌 Mark Follow-up</button>
+        </form>
+      </div>
+    {% else %}
+      <div class="empty">No applied jobs yet.</div>
+    {% endfor %}
+    </div>
+  </div>
+
+  {# FOLLOW-UP #}
+  <div class="tab-panel" id="tab-followup">
+    <div class="info-banner yellow">
+      ⏰ <strong>Auto-flagged</strong> = applied 7+ days ago &nbsp;·&nbsp; 📌 <strong>Pinned</strong> = manually marked by you
+    </div>
+    {% for job in followups %}
+      {% set is_pinned = job.pinned %}
+      <div class="job-card {% if is_pinned %}purple{% else %}orange{% endif %}">
+        <div class="left">
+          <h4>{{ job.title }} <span>{% if job.company %}@ {{ job.company }}{% endif %}</span></h4>
+          <div class="meta">
+            <span class="badge {% if job.platform == 'linkedin' %}li{% else %}nk{% endif %}">{{ job.platform | upper | truncate(2, True, '') }}</span>
+            {% if is_pinned %}
+              <span class="badge pinned">📌 pinned</span>
+            {% elif job.days_ago is not none %}
+              <span class="badge auto">⏰ auto · {{ job.days_ago }}d</span>
+            {% endif %}
+            {% if job.url %}<a href="{{ job.url }}" target="_blank">View Job ↗</a>{% endif %}
+          </div>
+        </div>
+        <form action="/unpin/{{ job.id }}" method="post" style="margin:0">
+          <button class="unpin-btn" type="submit">{% if is_pinned %}✕ Unpin{% else %}✕ Remove{% endif %}</button>
+        </form>
+      </div>
+    {% else %}
+      <div class="empty">No follow-ups yet. Jobs applied 7+ days ago appear here automatically.</div>
+    {% endfor %}
+  </div>
+
+  {# MANUAL #}
+  <div class="tab-panel" id="tab-manual">
+    <div class="info-banner red">
+      ⚠️ The agent could not apply to these jobs automatically — they need your manual attention.
+    </div>
+    {% for job in manual %}
+      <div class="job-card red">
+        <div class="left">
+          <h4>{{ job.title }} <span>{% if job.company %}@ {{ job.company }}{% endif %}</span></h4>
+          <div class="meta">
+            <span class="badge {% if job.platform == 'linkedin' %}li{% else %}nk{% endif %}">{{ job.platform | upper | truncate(2, True, '') }}</span>
+            <span class="badge reason">{{ job.status | replace('_', ' ') | title }}</span>
+            {% if job.url %}<a href="{{ job.url }}" target="_blank">Apply Manually ↗</a>{% endif %}
+          </div>
+        </div>
+      </div>
+    {% else %}
+      <div class="empty">No manual review items.</div>
+    {% endfor %}
+  </div>
+
+  {# SKIPPED #}
+  <div class="tab-panel" id="tab-skipped">
+    <div class="info-banner grey">
+      These jobs were skipped by the AI scorer (score &lt; 6/10).
+    </div>
+    {% for job in skipped %}
+      <div class="job-card grey">
+        <div class="left">
+          <h4>{{ job.title }} <span>{% if job.company %}@ {{ job.company }}{% endif %}</span></h4>
+          <div class="meta">
+            <span class="badge {% if job.platform == 'linkedin' %}li{% else %}nk{% endif %}">{{ job.platform | upper | truncate(2, True, '') }}</span>
+            {% if job.score is not none %}
+              <span class="badge skipped">Score {{ job.score }}/10</span>
+            {% endif %}
+            {% if job.applied_at %}<span>{{ job.applied_at[:10] }}</span>{% endif %}
+          </div>
+        </div>
+      </div>
+    {% else %}
+      <div class="empty">No skipped jobs.</div>
+    {% endfor %}
+  </div>
+
+</div>
+
+<script>
+function switchTab(name, el) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('tab-' + name).classList.add('active');
+}
+function filterCards(listId, query) {
+  const q = query.toLowerCase();
+  document.querySelectorAll('#' + listId + ' .job-card').forEach(card => {
+    const text = card.dataset.search || '';
+    card.style.display = text.includes(q) ? '' : 'none';
+  });
+}
+window.addEventListener('load', () => {
+  const hash = location.hash.replace('#', '');
+  if (hash) {
+    const el = document.querySelector(`.tab[onclick*="${hash.replace('tab-', '')}"]`);
+    if (el) el.click();
+  }
+});
+</script>
+</body>
+</html>
