@@ -3,6 +3,7 @@ import os
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
+from core.llm_helper import extract_text
 
 load_dotenv()
 
@@ -12,7 +13,7 @@ SCORE_THRESHOLD = 6
 class JobScorer:
     def __init__(self):
         self.llm = ChatGoogleGenerativeAI(
-            model="gemini-1.5-flash",
+            model="gemini-flash-latest",
             temperature=0,
             google_api_key=os.getenv("GOOGLE_API_KEY"),
         )
@@ -39,7 +40,7 @@ Respond with ONLY valid JSON, no markdown fences:
         for attempt in range(3):
             try:
                 response = self.llm.invoke([HumanMessage(content=prompt)])
-                text = response.content.strip()
+                text = extract_text(response.content).strip()
                 if text.startswith("```"):
                     parts = text.split("```")
                     text = parts[1]

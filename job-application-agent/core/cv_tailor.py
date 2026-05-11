@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
 import markdown2
+from core.llm_helper import extract_text
 
 load_dotenv()
 
@@ -11,7 +12,7 @@ class CVTailor:
     def __init__(self, base_cv_path="base_resume.md"):
         self.base_cv_path = base_cv_path
         self.llm = ChatGoogleGenerativeAI(
-            model="gemini-1.5-flash",
+            model="gemini-flash-latest",
             temperature=0.3,
             google_api_key=os.getenv("GOOGLE_API_KEY"),
         )
@@ -38,7 +39,7 @@ RESUME:
         for attempt in range(3):
             try:
                 response = self.llm.invoke([HumanMessage(content=prompt)])
-                tailored = response.content.strip()
+                tailored = extract_text(response.content).strip()
                 if tailored.startswith("```"):
                     tailored = tailored.split("```")[1]
                     if tailored.startswith(("markdown", "md")):
