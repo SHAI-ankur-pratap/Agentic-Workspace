@@ -1,0 +1,9 @@
+playwright==1.42.0
+langchain
+langchain-google-genai
+python-dotenv
+pydantic
+pyyaml
+schedule
+markdown2
+fpdf2

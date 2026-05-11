@@ -1,0 +1,69 @@
+personal_info:
+  first_name: "Ankur"
+  last_name: "Pratap"
+  email: "ankurpratap32@yahoo.in"
+  phone: "+91-9113572745"
+  location: "Delhi, 110075"
+  linkedin: "" # Add your LinkedIn URL
+  github: "" # Add your GitHub URL (optional)
+
+preferences:
+  roles:
+    - "QA Lead"
+    - "QA Automation Manager"
+    - "Lead QA Engineer"
+    - "SDET Lead"
+    - "Senior QA Automation Engineer"
+  locations:
+    - "Remote"
+    - "Hybrid"
+  minimum_salary: "35 LPA"
+  current_salary: "25 LPA"
+
+experience:
+  - company: "Shorthills AI"
+    title: "QA Lead"
+    start_date: "2024-12"
+    end_date: "Present"
+    description: "Leading QA strategy for generative AI products. Developed intent-defined test generator using GPT-4. Built self-healing UI automation frameworks (reducing failure by 70%). Designed container-based CI/CD pipelines."
+  - company: "Aristocrat Technologies"
+    title: "Technical Lead"
+    start_date: "2022-01"
+    end_date: "2024-12"
+    description: "Deployed controllers and related software in casinos worldwide. Created automation suite reducing effort hours by 80%. Conducted smoke, functional, UI, cross-browser, and performance testing."
+  - company: "Ovalelabs Pvt. Ltd."
+    title: "Senior Software Consultant"
+    start_date: "2020-02"
+    end_date: "2021-11"
+    description: "Verified proprietary application for checking call quality. Collaborated with Dev, BA, and QA teams. Conducted test case and defect reviews."
+  - company: "Nokia Networks Pvt. Ltd."
+    title: "R & D Engineer"
+    start_date: "2015-07"
+    end_date: "2018-03"
+    description: "Increased system performance within LTE R&D. Responsible for functional, UI, cross-browser, headless, regression testing."
+
+education:
+  - institution: "National Institute of Technology | Agartala"
+    degree: "B.Tech: Computer Science & Engineering"
+    graduation_year: 2015
+
+skills:
+  - Python
+  - JavaScript
+  - PyTest
+  - Selenium
+  - Playwright
+  - WebDriverIO
+  - Prompt Engineering & Test Generation
+  - API & Performance Testing
+  - CI/CD (GitHub Actions, Jenkins)
+  - Docker
+  - AWS
+
+qa_bank:
+  - question: "Will you now or in the future require sponsorship for employment visa status?"
+    answer: "No"
+  - question: "Are you legally authorized to work in the country you are applying in?"
+    answer: "Yes"
+  - question: "Notice Period"
+    answer: "1 month" # Please update if different
