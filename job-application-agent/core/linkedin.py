@@ -1,12 +1,20 @@
-from core.browser import JobBrowserAgent
-from playwright.async_api import async_playwright
 import asyncio
 import os
+import random
 from dotenv import load_dotenv
+from playwright.async_api import async_playwright
+
+from core.browser import JobBrowserAgent
 from core.filter import JobFilter
 from core.cv_tailor import CVTailor
+from core.form_filler import UniversalFormFiller
+from core.external_portal import ExternalPortalAgent
+from core.db import JobDatabase
 
 load_dotenv()
+
+LINKEDIN_FEED_INDICATOR = ".global-nav__me-photo"
+
 
 class LinkedInAgent(JobBrowserAgent):
     def __init__(self, headless=False):
@@ -15,197 +23,306 @@ class LinkedInAgent(JobBrowserAgent):
         self.email = os.getenv("LINKEDIN_EMAIL")
         self.password = os.getenv("LINKEDIN_PASSWORD")
 
-    async def auto_login(self, page):
+    async def _is_logged_in(self, page) -> bool:
+        try:
+            await page.goto("https://www.linkedin.com/feed", wait_until="domcontentloaded", timeout=30000)
+            await page.wait_for_timeout(2000)
+            el = await page.query_selector(LINKEDIN_FEED_INDICATOR)
+            return el is not None
+        except Exception:
+            return False
+
+    async def auto_login(self, page) -> bool:
         if os.path.exists(self.state_file):
-            return True
-        print(f"🤖 Agentic Login to LinkedIn with {self.email}...")
+            if await self._is_logged_in(page):
+                print("✅ LinkedIn session valid.")
+                return True
+            print("⚠️ LinkedIn session expired. Re-logging in...")
+            os.remove(self.state_file)
+
+        print(f"🤖 Logging into LinkedIn as {self.email}...")
         await page.goto(self.login_url)
         await page.fill("input#username", self.email)
         await page.fill("input#password", self.password)
         await page.click("button[type='submit']")
-        print("⏳ Waiting 60 seconds for you to approve the LinkedIn 2FA notification on your phone...")
-        await page.wait_for_timeout(60000)
-        
-        # Check if login succeeded
+        print("⏳ Waiting 90s for 2FA approval on your phone...")
+        await page.wait_for_timeout(90000)
+
         if "feed" in page.url or "checkpoint" not in page.url:
             await page.context.storage_state(path=self.state_file)
-            print("✅ Autonomous login successful. Session saved.")
+            print("✅ Login successful. Session saved.")
             return True
-        else:
-            print("⚠️ Autonomous login blocked by CAPTCHA/OTP.")
-            await page.screenshot(path="linkedin_login_error.png")
-            return False
 
-    async def autonomous_search_and_apply(self, profile: dict, generator=None):
-        """Fully autonomous loop: Log in -> Search -> Apply"""
+        print("⚠️ Login blocked (CAPTCHA/OTP).")
+        await page.screenshot(path="linkedin_login_error.png")
+        return False
+
+    async def login_and_save_state(self, url):
         async with async_playwright() as p:
             browser = await self.get_browser(p)
             context = await self.get_context(browser)
             page = await context.new_page()
-            
-            # Step 1: Login
-            success = await self.auto_login(page)
-            if not success:
-                await browser.close()
-                return
-
-            # Step 2: Search for roles
-            roles = profile.get("preferences", {}).get("roles", ["QA Lead"])
-            search_query = "%20".join(roles[0].split())
-            search_url = f"https://www.linkedin.com/jobs/search/?keywords={search_query}&sortBy=DD" # DD = Most Recent
-            
-            print(f"🔍 Agentic Search: Navigating to job search for '{roles[0]}' (Sorted by Recent)...")
-            try:
-                await page.goto(search_url, wait_until="domcontentloaded", timeout=60000)
-            except Exception as e:
-                print(f"⚠️ Warning during navigation: {e} (Continuing anyway)")
-            await page.wait_for_timeout(5000)
-            
-            from core.db import JobDatabase
-            db = JobDatabase()
-            
-            max_pages = 5
-            for page_num in range(1, max_pages + 1):
-                print(f"\n📄 ====== Scraping Page {page_num} ======")
-                print("🎯 Extracting all Job Cards from the list...")
-                
-                # Scroll down the left pane slightly to ensure jobs render
-                await page.evaluate("document.querySelector('.jobs-search-results-list')?.scrollTo(0, document.body.scrollHeight)")
-                await page.wait_for_timeout(3000)
-                
-                job_data_list = await page.evaluate("""() => {
-                    const cards = Array.from(document.querySelectorAll('a'));
-                    const jobCards = cards.filter(a => a.className.includes('job-card-list__title') || a.className.includes('base-search-card__title'));
-                    return jobCards.map((card, idx) => {
-                        return { index: idx, title: card.textContent.trim() };
-                    });
-                }""")
-                
-                job_count = len(job_data_list)
-                print(f"✅ Found {job_count} matching job cards on Page {page_num}!")
-                
-                if job_count == 0:
-                    print("No more jobs found. Exiting pagination loop.")
-                    break
-                
-                import random
-                
-                for job_data in job_data_list:
-                    i = job_data["index"]
-                    job_title = job_data["title"]
-                    job_id = db.generate_job_id("UnknownCompany", job_title)
-                    
-                    print(f"\n--- 🔄 Processing Job {i+1} of {job_count}: {job_title[:30]}... ---")
-                    
-                    if db.is_processed(job_id):
-                        print("⏭️ [Idempotency] Job already processed previously! Skipping to save API costs.")
-                        continue
-                    
-                    print("🎯 Clicking the job card to load details...")
-                    try:
-                        await page.evaluate(f"""(index) => {{
-                            const cards = Array.from(document.querySelectorAll('a'));
-                            const jobCards = cards.filter(a => a.className.includes('job-card-list__title') || a.className.includes('base-search-card__title'));
-                            if (jobCards[index]) jobCards[index].click();
-                        }}""", i)
-                        await page.wait_for_timeout(3000) # Wait for right pane to load
-                    except Exception as e:
-                        print(f"⚠️ Could not click job card {i+1}: {e}")
-                        continue
-
-                    # Mock JD for AI filtering
-                    mock_jd = "Looking for a QA Automation Manager with 8+ years experience in Playwright and PyTest."
-                    
-                    # Step 3: Filter Job
-                    job_filter = JobFilter(profile)
-                    filter_result = job_filter.score_job(roles[0], mock_jd)
-                    
-                    if not filter_result["passed"]:
-                        print("⏭️ Job does not meet criteria. Skipping...")
-                        db.mark_processed(job_id, "linkedin", "Skipped (Low Filter Score)", title=job_title)
-                        continue
-
-                    # Step 4: Tailor CV
-                    tailor = CVTailor()
-                    tailored_md = tailor.rewrite_cv(mock_jd)
-                    tailored_cv_path = tailor.generate_pdf(tailored_md, f"tailored_linkedin_cv_{i+1}.pdf")
-
-                    # Step 5: Apply
-                    print("🤖 Agentic Apply: Clicking 'Easy Apply' button...")
-                    try:
-                        # Attempt to force click the real Easy Apply button using JavaScript
-                        await page.evaluate("""() => {
-                            const buttons = Array.from(document.querySelectorAll('button'));
-                            const easyApplyBtn = buttons.find(b => b.textContent.includes('Easy Apply') || b.className.includes('jobs-apply-button'));
-                            if (easyApplyBtn) {
-                                easyApplyBtn.style.border = '5px solid red'; // Highlight it
-                                easyApplyBtn.click();
-                            }
-                        }""")
-                        print("✅ Clicked Easy Apply!")
-                        
-                        print("⏳ Waiting 3 seconds for the Easy Apply modal or external site to load...")
-                        await page.wait_for_timeout(3000)
-                        
-                        # --- NEW: Form Filler Injection ---
-                        from core.form_filler import UniversalFormFiller
-                        filler = UniversalFormFiller(profile)
-                        form_success = await filler.parse_and_fill(page, page.url)
-                        
-                        if not form_success:
-                            print(f"⏭️ Skipping job {i+1} due to external form constraints (e.g., Account Wall).")
-                            db.mark_processed(job_id, "linkedin", "Skipped (Form Constraint)", title=job_title)
-                            continue
-                        # ----------------------------------
-                        
-                        print("⏳ Waiting 8 seconds so you can see the Easy Apply modal before it closes...")
-                        await page.wait_for_timeout(8000)
-                        
-                        first_name = profile.get("personal_info", {}).get("first_name", "User")
-                        print(f"   -> Filled Name: {first_name}")
-                        print(f"   -> Uploaded tailored CV: {tailored_cv_path}")
-                        
-                        print("✅ LIVE: LinkedIn Application flow successfully triggered autonomously!")
-                        db.mark_processed(job_id, "linkedin", "Applied", title=job_title)
-                        
-                        # Close the modal manually if it's still open so we can proceed to the next job
-                        await page.evaluate("""() => {
-                            const closeBtns = Array.from(document.querySelectorAll('button'));
-                            const dismissBtn = closeBtns.find(b => b.getAttribute('aria-label') === 'Dismiss' || b.getAttribute('data-test-modal-close-btn') === 'true');
-                            if (dismissBtn) dismissBtn.click();
-                        }""")
-                        
-                        # Randomized delay
-                        delay = random.randint(10, 30)
-                        print(f"💤 Sleeping for {delay} seconds to prevent anti-bot bans before next job...")
-                        await page.wait_for_timeout(delay * 1000)
-                        
-                    except Exception as e:
-                        print(f"⚠️ Could not interact with the Easy Apply button for job {i+1}: {e}")
-                        db.mark_processed(job_id, "linkedin", "Failed (Interaction Error)", title=job_title)
-                        
-                # Go to Next Page
-                print("⏭️ Looking for Next Page button...")
-                try:
-                    has_next = await page.evaluate("""() => {
-                        const buttons = Array.from(document.querySelectorAll('button'));
-                        const nextBtn = buttons.find(b => b.getAttribute('aria-label') && b.getAttribute('aria-label').toLowerCase().includes('next'));
-                        if (nextBtn) {
-                            nextBtn.click();
-                            return true;
-                        }
-                        return false;
-                    }""")
-                    
-                    if not has_next:
-                        print("✅ No more pages found. Search exhausted.")
-                        break
-                        
-                    print(f"⏳ Sleeping for 5 seconds while Page {page_num + 1} loads...")
-                    await page.wait_for_timeout(5000)
-                except Exception as e:
-                    print("⚠️ Could not click next page. Exiting loop.")
-                    break
-            
-            print("🎉 Full Pagination and Batch processing complete!")
+            await self.auto_login(page)
             await browser.close()
+
+    async def _extract_jd(self, page) -> str:
+        for sel in [
+            ".jobs-description-content__text",
+            ".jobs-box__html-content",
+            ".job-view-layout",
+            "#job-details",
+        ]:
+            try:
+                el = await page.query_selector(sel)
+                if el:
+                    text = await el.inner_text()
+                    if text and len(text) > 100:
+                        return text[:3000]
+            except Exception:
+                continue
+        return ""
+
+    async def _extract_company(self, page) -> str:
+        for sel in [
+            ".jobs-unified-top-card__company-name",
+            ".topcard__org-name-link",
+            ".jobs-details-top-card__company-url",
+        ]:
+            try:
+                el = await page.query_selector(sel)
+                if el:
+                    return (await el.inner_text()).strip()
+            except Exception:
+                continue
+        return "UnknownCompany"
+
+    async def _handle_easy_apply_modal(self, page, profile, resume_pdf_path, filler) -> str:
+        for step in range(8):
+            await page.wait_for_timeout(2000)
+
+            try:
+                file_input = await page.query_selector('input[type="file"]')
+                if file_input and os.path.exists(resume_pdf_path):
+                    await file_input.set_input_files(resume_pdf_path)
+                    print(f"   📎 Uploaded resume at step {step + 1}")
+                    await page.wait_for_timeout(1000)
+            except Exception:
+                pass
+
+            await filler.parse_and_fill(page, page.url)
+
+            submit_btn = page.locator(
+                'button:has-text("Submit application"), button:has-text("Submit Application")'
+            )
+            if await submit_btn.count() > 0:
+                try:
+                    if await submit_btn.first.is_visible():
+                        await submit_btn.first.click()
+                        await page.wait_for_timeout(2000)
+                        print("✅ Easy Apply submitted!")
+                        return "applied"
+                except Exception:
+                    pass
+
+            next_btn = page.locator(
+                'button:has-text("Next"), button:has-text("Review"), button:has-text("Continue to next step")'
+            )
+            if await next_btn.count() > 0:
+                try:
+                    if await next_btn.first.is_visible():
+                        await next_btn.first.click()
+                        continue
+                except Exception:
+                    pass
+
+            modal = await page.query_selector('[data-test-modal]')
+            if not modal:
+                return "applied"
+            break
+
+        return "failed"
+
+    async def apply_to_job(self, job_url: str, profile: dict, generator=None):
+        async with async_playwright() as p:
+            browser = await self.get_browser(p)
+            context = await self.get_context(browser)
+            page = await context.new_page()
+            await page.goto(job_url, wait_until="domcontentloaded", timeout=30000)
+            await page.wait_for_timeout(3000)
+
+            jd = await self._extract_jd(page)
+            company = await self._extract_company(page)
+            tailor = CVTailor()
+            tailored_md = tailor.rewrite_cv(jd or job_url)
+            cv_path = "tailored_cv_single.pdf"
+            await tailor.generate_pdf(tailored_md, cv_path)
+            filler = UniversalFormFiller(profile)
+
+            try:
+                await page.evaluate("""() => {
+                    const btns = Array.from(document.querySelectorAll('button'));
+                    const btn = btns.find(b =>
+                        b.textContent.includes('Easy Apply') || b.className.includes('jobs-apply-button')
+                    );
+                    if (btn) btn.click();
+                }""")
+                await page.wait_for_timeout(3000)
+                outcome = await self._handle_easy_apply_modal(page, profile, cv_path, filler)
+            except Exception as e:
+                print(f"⚠️ Apply error: {e}")
+                outcome = "failed"
+            finally:
+                if os.path.exists(cv_path):
+                    os.remove(cv_path)
+
+            await browser.close()
+            print(f"Outcome: {outcome}")
+
+    async def autonomous_search_and_apply(self, profile: dict, generator=None):
+        stats = {"applied": 0, "skipped": 0, "failed": 0, "manual": 0}
+
+        async with async_playwright() as p:
+            browser = await self.get_browser(p)
+            context = await self.get_context(browser)
+            page = await context.new_page()
+
+            if not await self.auto_login(page):
+                await browser.close()
+                return stats
+
+            db = JobDatabase()
+            roles = profile.get("preferences", {}).get("roles", ["QA Lead"])
+
+            for role in roles[:3]:
+                search_query = "%20".join(role.split())
+                url = f"https://www.linkedin.com/jobs/search/?keywords={search_query}&f_AL=true&sortBy=DD"
+                print(f"\n🔍 LinkedIn: searching '{role}' (Easy Apply only)...")
+                try:
+                    await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                except Exception as e:
+                    print(f"⚠️ Navigation: {e}")
+                await page.wait_for_timeout(4000)
+
+                for page_num in range(1, 4):
+                    print(f"\n📄 Page {page_num}...")
+                    await page.evaluate(
+                        "document.querySelector('.jobs-search-results-list')?.scrollTo(0, 9999)"
+                    )
+                    await page.wait_for_timeout(3000)
+
+                    job_cards = await page.evaluate("""() => {
+                        const anchors = Array.from(document.querySelectorAll(
+                            'a.job-card-list__title--link, a[class*="job-card-list__title"], a[class*="base-search-card__title"]'
+                        ));
+                        return anchors.map((a, idx) => ({
+                            index: idx,
+                            title: a.textContent.trim(),
+                            href: a.href || ''
+                        })).filter(j => j.title.length > 3);
+                    }""")
+
+                    if not job_cards:
+                        print("No cards found, stopping pagination.")
+                        break
+
+                    print(f"✅ {len(job_cards)} cards found")
+
+                    for job in job_cards:
+                        title = job["title"]
+                        job_id = db.generate_job_id("linkedin_" + role, title)
+
+                        if db.is_processed(job_id):
+                            stats["skipped"] += 1
+                            continue
+
+                        print(f"\n  → {title[:55]}")
+
+                        try:
+                            await page.evaluate(
+                                """(idx) => {
+                                    const a = Array.from(document.querySelectorAll(
+                                        'a.job-card-list__title--link, a[class*="job-card-list__title"], a[class*="base-search-card__title"]'
+                                    ))[idx];
+                                    if (a) a.click();
+                                }""",
+                                job["index"],
+                            )
+                            await page.wait_for_timeout(3000)
+                        except Exception as e:
+                            print(f"  ⚠️ Card click: {e}")
+                            continue
+
+                        jd = await self._extract_jd(page)
+                        company = await self._extract_company(page)
+                        job_id = db.generate_job_id(company, title)
+
+                        if db.is_processed(job_id):
+                            stats["skipped"] += 1
+                            continue
+
+                        job_filter = JobFilter(profile)
+                        result = job_filter.score_job(title, jd or title)
+                        if not result["passed"]:
+                            db.mark_processed(job_id, "linkedin", "skipped_low_score", title=title, company=company)
+                            stats["skipped"] += 1
+                            continue
+
+                        tailor = CVTailor()
+                        tailored_md = tailor.rewrite_cv(jd or title)
+                        cv_path = f"tailored_linkedin_cv_{job_id[:8]}.pdf"
+                        await tailor.generate_pdf(tailored_md, cv_path)
+
+                        outcome = "failed"
+                        try:
+                            await page.evaluate("""() => {
+                                const btns = Array.from(document.querySelectorAll('button'));
+                                const btn = btns.find(b =>
+                                    b.textContent.includes('Easy Apply') ||
+                                    b.className.includes('jobs-apply-button')
+                                );
+                                if (btn) btn.click();
+                            }""")
+                            await page.wait_for_timeout(3000)
+
+                            if "linkedin.com" not in page.url:
+                                filler = UniversalFormFiller(profile)
+                                portal = ExternalPortalAgent(profile, filler)
+                                outcome = await portal.apply(page, page.url, cv_path)
+                            else:
+                                filler = UniversalFormFiller(profile)
+                                outcome = await self._handle_easy_apply_modal(page, profile, cv_path, filler)
+
+                        except Exception as e:
+                            print(f"  ⚠️ Apply error: {e}")
+                            outcome = "failed"
+                        finally:
+                            if os.path.exists(cv_path):
+                                os.remove(cv_path)
+
+                        db.mark_processed(job_id, "linkedin", outcome, title=title, company=company)
+                        stats[outcome if outcome in stats else "failed"] += 1
+                        print(f"  → Outcome: {outcome}")
+
+                        await page.wait_for_timeout(random.randint(8, 20) * 1000)
+
+                    try:
+                        has_next = await page.evaluate("""() => {
+                            const btn = Array.from(document.querySelectorAll('button')).find(
+                                b => (b.getAttribute('aria-label') || '').toLowerCase().includes('next')
+                            );
+                            if (btn) { btn.click(); return true; }
+                            return false;
+                        }""")
+                        if not has_next:
+                            break
+                        await page.wait_for_timeout(5000)
+                    except Exception:
+                        break
+
+            await browser.close()
+
+        print(
+            f"\n📊 LinkedIn → ✅ Applied:{stats['applied']} ⏭ Skipped:{stats['skipped']} "
+            f"❌ Failed:{stats['failed']} 📋 Manual:{stats['manual']}"
+        )
+        return stats
