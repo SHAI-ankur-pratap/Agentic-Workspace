@@ -1,7 +1,7 @@
 import json
 import os
 import hashlib
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class JobDatabase:
@@ -37,7 +37,7 @@ class JobDatabase:
             "title": title,
             "company": company,
             "url": url,
-            "applied_at": datetime.now().isoformat(),
+            "applied_at": datetime.now(timezone.utc).isoformat(),
             "score": score,
             "pinned": existing_pinned,
         }
@@ -58,7 +58,9 @@ class JobDatabase:
             }
         return result
 
-    def toggle_pin(self, job_id, pinned: bool):
-        if job_id in self.data:
-            self.data[job_id]["pinned"] = pinned
-            self._save()
+    def toggle_pin(self, job_id, pinned: bool) -> bool:
+        if job_id not in self.data:
+            return False
+        self.data[job_id]["pinned"] = pinned
+        self._save()
+        return True

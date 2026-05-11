@@ -63,3 +63,9 @@ def test_pin_preserved_on_re_mark(tmp_path):
     db.mark_processed("job1", "linkedin", "applied", title="QA Lead", company="X")
     all_jobs = db.get_all()
     assert all_jobs["job1"]["pinned"] is True
+
+
+def test_toggle_pin_unknown_job_returns_false(tmp_path):
+    db = make_db(tmp_path)
+    result = db.toggle_pin("nonexistent", True)
+    assert result is False
