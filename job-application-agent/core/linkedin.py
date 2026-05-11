@@ -229,6 +229,7 @@ class LinkedInAgent(JobBrowserAgent):
 
                     for job in job_cards:
                         title = job["title"]
+                        job_url = job.get("href", "")
                         job_id = db.generate_job_id("linkedin_" + role, title)
 
                         if db.is_processed(job_id):
@@ -262,8 +263,11 @@ class LinkedInAgent(JobBrowserAgent):
 
                         job_filter = JobFilter(profile)
                         result = job_filter.score_job(title, jd or title)
+                        job_score = result.get("score", 0)
                         if not result["passed"]:
-                            db.mark_processed(job_id, "linkedin", "skipped_low_score", title=title, company=company)
+                            db.mark_processed(job_id, "linkedin", "skipped_low_score",
+                                              title=title, company=company,
+                                              url=job_url, score=job_score)
                             stats["skipped"] += 1
                             continue
 
@@ -290,7 +294,9 @@ class LinkedInAgent(JobBrowserAgent):
                                 outcome = await portal.apply(page, page.url, cv_path)
                             else:
                                 filler = UniversalFormFiller(profile)
-                                outcome = await self._handle_easy_apply_modal(page, profile, cv_path, filler)
+                                outcome = await self._handle_easy_apply_modal(
+                                    page, profile, cv_path, filler
+                                )
 
                         except Exception as e:
                             print(f"  ⚠️ Apply error: {e}")
@@ -299,7 +305,9 @@ class LinkedInAgent(JobBrowserAgent):
                             if os.path.exists(cv_path):
                                 os.remove(cv_path)
 
-                        db.mark_processed(job_id, "linkedin", outcome, title=title, company=company)
+                        db.mark_processed(job_id, "linkedin", outcome,
+                                          title=title, company=company,
+                                          url=job_url, score=job_score)
                         stats[outcome if outcome in stats else "failed"] += 1
                         print(f"  → Outcome: {outcome}")
 

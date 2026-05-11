@@ -191,8 +191,11 @@ class NaukriAgent(JobBrowserAgent):
 
                         job_filter = JobFilter(profile)
                         result = job_filter.score_job(title, jd or title)
+                        job_score = result.get("score", 0)
                         if not result["passed"]:
-                            db.mark_processed(job_id, "naukri", "skipped_low_score", title=title, company=company)
+                            db.mark_processed(job_id, "naukri", "skipped_low_score",
+                                              title=title, company=company,
+                                              url=href, score=job_score)
                             stats["skipped"] += 1
                             await job_page.close()
                             continue
@@ -231,7 +234,9 @@ class NaukriAgent(JobBrowserAgent):
                             if os.path.exists(cv_path):
                                 os.remove(cv_path)
 
-                        db.mark_processed(job_id, "naukri", outcome, title=title, company=company)
+                        db.mark_processed(job_id, "naukri", outcome,
+                                          title=title, company=company,
+                                          url=href, score=job_score)
                         stats[outcome if outcome in stats else "failed"] += 1
                         print(f"  → Outcome: {outcome}")
 
