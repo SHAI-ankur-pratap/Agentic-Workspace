@@ -7,3 +7,4 @@ pyyaml
 schedule
 markdown2
 fpdf2
+flask
