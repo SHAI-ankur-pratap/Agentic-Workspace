@@ -13,6 +13,6 @@ applied_jobs.json
 __pycache__/
 *.pyc
 
-# Debug scripts
+# Debug scripts (root-level only, not the tests/ directory)
 debug_*.py
-test_*.py
+/test_*.py
