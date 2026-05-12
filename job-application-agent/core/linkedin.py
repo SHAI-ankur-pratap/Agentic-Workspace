@@ -278,6 +278,147 @@ class LinkedInAgent(JobBrowserAgent):
         print("  ⚠️ Reached max steps without submitting.")
         return "failed"
 
+    async def _collect_job_urls(self, page, role: str) -> list:
+        """Scrape ALL job URLs for a role across pages before touching any. Returns [(url, title)]."""
+        search_query = "%20".join(role.split())
+        search_url = f"https://www.linkedin.com/jobs/search/?keywords={search_query}&f_AL=true&sortBy=DD"
+        try:
+            await page.goto(search_url, wait_until="domcontentloaded", timeout=60000)
+        except Exception as e:
+            print(f"⚠️ Search navigation: {e}")
+        await page.wait_for_timeout(4000)
+
+        seen_urls = set()
+        collected = []
+
+        for page_num in range(1, 5):
+            print(f"  Collecting page {page_num}...")
+            try:
+                await page.evaluate(
+                    "document.querySelector('.jobs-search-results-list')?.scrollTo(0, 9999)"
+                )
+            except Exception:
+                pass
+            await page.wait_for_timeout(3000)
+
+            cards = await page.evaluate("""() => {
+                const anchors = Array.from(document.querySelectorAll(
+                    'a.job-card-list__title--link, a[class*="job-card-list__title"], a[class*="base-search-card__title"]'
+                ));
+                return anchors.map(a => ({
+                    title: a.textContent.trim(),
+                    href: (a.href || '').split('?')[0]
+                })).filter(j => j.title.length > 3 && j.href.includes('/jobs/view/'));
+            }""")
+
+            new_cards = 0
+            for c in cards:
+                if c["href"] and c["href"] not in seen_urls:
+                    seen_urls.add(c["href"])
+                    collected.append((c["href"], c["title"]))
+                    new_cards += 1
+
+            print(f"  +{new_cards} new jobs (total: {len(collected)})")
+            if not cards or new_cards == 0:
+                break
+
+            # Go to next page
+            try:
+                went_next = await page.evaluate("""() => {
+                    const btn = Array.from(document.querySelectorAll('button')).find(
+                        b => (b.getAttribute('aria-label') || '').toLowerCase().includes('next')
+                    );
+                    if (btn && !btn.disabled) { btn.click(); return true; }
+                    return false;
+                }""")
+                if not went_next:
+                    break
+                await page.wait_for_timeout(4000)
+            except Exception:
+                break
+
+        return collected
+
+    async def _process_single_job(self, context, job_url: str, job_title: str,
+                                   role: str, profile: dict, db, stats: dict) -> str:
+        """Open a job page directly, score, tailor CV, apply. Returns outcome string."""
+        # Open job in a dedicated tab so the search page stays intact
+        job_page = await context.new_page()
+        try:
+            await job_page.goto(job_url, wait_until="domcontentloaded", timeout=30000)
+        except Exception as e:
+            print(f"  ⚠️ Page load: {e}")
+            await job_page.close()
+            return "failed"
+
+        await job_page.wait_for_timeout(2000)
+
+        jd = await self._extract_jd(job_page)
+        company = await self._extract_company(job_page)
+        job_id = db.generate_job_id(company, job_title)
+
+        if db.is_processed(job_id):
+            await job_page.close()
+            stats["skipped"] += 1
+            return "skipped"
+
+        # Score
+        job_filter = JobFilter(profile)
+        result = job_filter.score_job(job_title, jd or job_title)
+        job_score = result.get("score", 0)
+        if not result["passed"]:
+            db.mark_processed(job_id, "linkedin", "skipped_low_score",
+                              title=job_title, company=company,
+                              url=job_url, score=job_score)
+            stats["skipped"] += 1
+            await job_page.close()
+            return "skipped_low_score"
+
+        # Tailor CV
+        tailor = CVTailor()
+        tailored_md = tailor.rewrite_cv(jd or job_title)
+        cv_path = f"tailored_linkedin_cv_{job_id[:8]}.pdf"
+        await tailor.generate_pdf(tailored_md, cv_path)
+
+        outcome = "failed"
+        ext_page = None
+        try:
+            modal_opened, ext_page = await self._click_easy_apply(job_page, context)
+
+            if not modal_opened:
+                print(f"  ⚠️ Apply button not found.")
+                outcome = "failed"
+            elif ext_page is not None:
+                filler = UniversalFormFiller(profile)
+                portal = ExternalPortalAgent(profile, filler)
+                outcome = await portal.apply(ext_page, ext_page.url, cv_path)
+            else:
+                filler = UniversalFormFiller(profile)
+                outcome = await self._handle_easy_apply_modal(
+                    job_page, profile, cv_path, filler
+                )
+        except Exception as e:
+            print(f"  ⚠️ Apply error: {e}")
+            outcome = "failed"
+        finally:
+            if ext_page is not None and ext_page != job_page:
+                try:
+                    await ext_page.close()
+                except Exception:
+                    pass
+            if os.path.exists(cv_path):
+                os.remove(cv_path)
+            try:
+                await job_page.close()
+            except Exception:
+                pass
+
+        db.mark_processed(job_id, "linkedin", outcome,
+                          title=job_title, company=company,
+                          url=job_url, score=job_score)
+        stats[outcome if outcome in stats else "failed"] += 1
+        return outcome
+
     async def apply_to_job(self, job_url: str, profile: dict, generator=None):
         async with async_playwright() as p:
             browser = await self.get_browser(p)
@@ -336,141 +477,42 @@ class LinkedInAgent(JobBrowserAgent):
             roles = profile.get("preferences", {}).get("roles", ["QA Lead"])
 
             for role in roles[:3]:
-                search_query = "%20".join(role.split())
-                url = f"https://www.linkedin.com/jobs/search/?keywords={search_query}&f_AL=true&sortBy=DD"
-                print(f"\n🔍 LinkedIn: searching '{role}' (Easy Apply only)...")
-                try:
-                    await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-                except Exception as e:
-                    print(f"⚠️ Navigation: {e}")
-                await page.wait_for_timeout(4000)
+                # Collect all job URLs first, then navigate directly to each.
+                # This avoids index-shifting when LinkedIn re-renders the list.
+                job_urls = await self._collect_job_urls(page, role)
+                print(f"\n✅ Collected {len(job_urls)} unique jobs for '{role}'")
 
-                for page_num in range(1, 4):
-                    print(f"\n📄 Page {page_num}...")
-                    await page.evaluate(
-                        "document.querySelector('.jobs-search-results-list')?.scrollTo(0, 9999)"
-                    )
-                    await page.wait_for_timeout(3000)
+                for job_url, job_title in job_urls:
+                    job_id = db.generate_job_id("linkedin_" + role, job_title)
+                    if db.is_processed(job_id):
+                        stats["skipped"] += 1
+                        continue
 
-                    job_cards = await page.evaluate("""() => {
-                        const anchors = Array.from(document.querySelectorAll(
-                            'a.job-card-list__title--link, a[class*="job-card-list__title"], a[class*="base-search-card__title"]'
-                        ));
-                        return anchors.map((a, idx) => ({
-                            index: idx,
-                            title: a.textContent.trim(),
-                            href: a.href || ''
-                        })).filter(j => j.title.length > 3);
-                    }""")
-
-                    if not job_cards:
-                        print("No cards found, stopping pagination.")
-                        break
-
-                    print(f"✅ {len(job_cards)} cards found")
-
-                    for job in job_cards:
-                        title = job["title"]
-                        job_url = job.get("href", "")
-                        job_id = db.generate_job_id("linkedin_" + role, title)
-
-                        if db.is_processed(job_id):
-                            stats["skipped"] += 1
-                            continue
-
-                        print(f"\n  → {title[:55]}")
-
-                        try:
-                            await page.evaluate(
-                                """(idx) => {
-                                    const a = Array.from(document.querySelectorAll(
-                                        'a.job-card-list__title--link, a[class*="job-card-list__title"], a[class*="base-search-card__title"]'
-                                    ))[idx];
-                                    if (a) a.click();
-                                }""",
-                                job["index"],
-                            )
-                            await page.wait_for_timeout(3000)
-                        except Exception as e:
-                            print(f"  ⚠️ Card click: {e}")
-                            continue
-
-                        jd = await self._extract_jd(page)
-                        company = await self._extract_company(page)
-                        job_id = db.generate_job_id(company, title)
-
-                        if db.is_processed(job_id):
-                            stats["skipped"] += 1
-                            continue
-
-                        job_filter = JobFilter(profile)
-                        result = job_filter.score_job(title, jd or title)
-                        job_score = result.get("score", 0)
-                        if not result["passed"]:
-                            db.mark_processed(job_id, "linkedin", "skipped_low_score",
-                                              title=title, company=company,
-                                              url=job_url, score=job_score)
-                            stats["skipped"] += 1
-                            continue
-
-                        tailor = CVTailor()
-                        tailored_md = tailor.rewrite_cv(jd or title)
-                        cv_path = f"tailored_linkedin_cv_{job_id[:8]}.pdf"
-                        await tailor.generate_pdf(tailored_md, cv_path)
-
-                        outcome = "failed"
-                        ext_page = None
-                        try:
-                            modal_opened, ext_page = await self._click_easy_apply(page, context)
-
-                            if not modal_opened:
-                                print(f"  ⚠️ Could not open Apply for: {title[:40]}")
-                                outcome = "failed"
-                            elif ext_page is not None:
-                                # External company portal opened (new tab or redirect)
-                                filler = UniversalFormFiller(profile)
-                                portal = ExternalPortalAgent(profile, filler)
-                                outcome = await portal.apply(ext_page, ext_page.url, cv_path)
-                            else:
-                                # Easy Apply modal is open on LinkedIn
-                                filler = UniversalFormFiller(profile)
-                                outcome = await self._handle_easy_apply_modal(
-                                    page, profile, cv_path, filler
-                                )
-
-                        except Exception as e:
-                            print(f"  ⚠️ Apply error: {e}")
-                            outcome = "failed"
-                        finally:
-                            if ext_page is not None and ext_page != page:
-                                try:
-                                    await ext_page.close()
-                                except Exception:
-                                    pass
-                            if os.path.exists(cv_path):
-                                os.remove(cv_path)
-
-                        db.mark_processed(job_id, "linkedin", outcome,
-                                          title=title, company=company,
-                                          url=job_url, score=job_score)
-                        stats[outcome if outcome in stats else "failed"] += 1
-                        print(f"  → Outcome: {outcome}")
-
-                        await page.wait_for_timeout(random.randint(8, 20) * 1000)
+                    print(f"\n  → {job_title[:55]}")
+                    print(f"     {job_url[:70]}")
 
                     try:
-                        has_next = await page.evaluate("""() => {
-                            const btn = Array.from(document.querySelectorAll('button')).find(
-                                b => (b.getAttribute('aria-label') || '').toLowerCase().includes('next')
-                            );
-                            if (btn) { btn.click(); return true; }
-                            return false;
-                        }""")
-                        if not has_next:
-                            break
-                        await page.wait_for_timeout(5000)
-                    except Exception:
-                        break
+                        outcome = await asyncio.wait_for(
+                            self._process_single_job(
+                                context, job_url, job_title, role, profile, db, stats
+                            ),
+                            timeout=240,  # 4 min hard cap per job — never get stuck
+                        )
+                    except asyncio.TimeoutError:
+                        print(f"  ⏱️ Job timed out after 4 min — moving on.")
+                        db.mark_processed(job_id, "linkedin", "failed",
+                                          title=job_title, url=job_url)
+                        stats["failed"] += 1
+                        outcome = "failed"
+                    except Exception as e:
+                        print(f"  ⚠️ Unexpected error: {e}")
+                        db.mark_processed(job_id, "linkedin", "failed",
+                                          title=job_title, url=job_url)
+                        stats["failed"] += 1
+                        outcome = "failed"
+
+                    print(f"  → Outcome: {outcome}")
+                    await asyncio.sleep(random.randint(5, 12))
 
             await browser.close()
 
