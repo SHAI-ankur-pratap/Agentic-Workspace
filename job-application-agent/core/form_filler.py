@@ -1,9 +1,9 @@
 import json
 import os
 from dotenv import load_dotenv
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
 from core.llm_helper import extract_text
+from core.llm_client import build_llm
 
 load_dotenv()
 
@@ -15,11 +15,7 @@ class UniversalFormFiller:
     def __init__(self, profile: dict):
         self.profile = profile
         self.manual_review_file = "manual_review.txt"
-        self.llm = ChatGoogleGenerativeAI(
-            model="gemini-flash-latest",
-            temperature=0,
-            google_api_key=os.getenv("GOOGLE_API_KEY"),
-        )
+        self.llm = build_llm(temperature=0)
 
     async def parse_and_fill(self, page, job_url: str) -> bool:
         print("🤖 [Form Filler] Scanning page for form fields...")

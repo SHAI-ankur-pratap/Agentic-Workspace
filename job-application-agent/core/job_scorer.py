@@ -1,9 +1,9 @@
 import json
 import os
 from dotenv import load_dotenv
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
 from core.llm_helper import extract_text
+from core.llm_client import build_llm
 
 load_dotenv()
 
@@ -12,11 +12,7 @@ SCORE_THRESHOLD = 6
 
 class JobScorer:
     def __init__(self):
-        self.llm = ChatGoogleGenerativeAI(
-            model="gemini-flash-latest",
-            temperature=0,
-            google_api_key=os.getenv("GOOGLE_API_KEY"),
-        )
+        self.llm = build_llm(temperature=0)
 
     def score(self, job_title: str, job_description: str, profile: dict) -> dict:
         roles = profile.get("preferences", {}).get("roles", [])

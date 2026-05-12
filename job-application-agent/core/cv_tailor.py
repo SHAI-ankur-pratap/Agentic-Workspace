@@ -1,9 +1,9 @@
 import os
 from dotenv import load_dotenv
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
 import markdown2
 from core.llm_helper import extract_text
+from core.llm_client import build_llm
 
 load_dotenv()
 
@@ -11,11 +11,7 @@ load_dotenv()
 class CVTailor:
     def __init__(self, base_cv_path="base_resume.md"):
         self.base_cv_path = base_cv_path
-        self.llm = ChatGoogleGenerativeAI(
-            model="gemini-flash-latest",
-            temperature=0.3,
-            google_api_key=os.getenv("GOOGLE_API_KEY"),
-        )
+        self.llm = build_llm(temperature=0.3)
 
     def rewrite_cv(self, job_description: str) -> str:
         with open(self.base_cv_path, "r") as f:
