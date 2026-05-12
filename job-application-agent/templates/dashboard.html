@@ -10,71 +10,90 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 a{color:#1976d2;text-decoration:none}
 a:hover{text-decoration:underline}
 
-.topbar{background:#0f2027;color:#fff;padding:12px 24px;display:flex;justify-content:space-between;align-items:center}
-.topbar h1{font-size:17px;font-weight:600}
-.topbar .meta{font-size:11px;color:#aaa}
-.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#4caf50;margin-right:5px;animation:pulse 2s infinite}
+.topbar{background:#0f2027;color:#fff;padding:10px 24px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.topbar h1{font-size:16px;font-weight:600;white-space:nowrap}
+.topbar .meta{font-size:11px;color:#aaa;flex:1}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#4caf50;margin-right:5px;animation:pulse 2s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 
+.run-btns{display:flex;gap:6px;flex-shrink:0}
+.run-btn{display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border-radius:5px;border:none;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap}
+.run-btn.li{background:#0a66c2;color:#fff}.run-btn.li:hover{background:#004182}
+.run-btn.nk{background:#e65100;color:#fff}.run-btn.nk:hover{background:#bf360c}
+.run-btn.both{background:#2e7d32;color:#fff}.run-btn.both:hover{background:#1b5e20}
+.run-btn.sm{padding:3px 10px;font-size:11px}
+
+.alert{padding:10px 24px;font-size:12px;font-weight:500;display:flex;align-items:center;gap:8px}
+.alert.success{background:#e8f5e9;color:#1b5e20;border-bottom:1px solid #c8e6c9}
+
 .tabs{background:#fff;border-bottom:1px solid #e0e0e0;padding:0 24px;display:flex;gap:0;overflow-x:auto}
-.tab{padding:12px 18px;cursor:pointer;border-bottom:3px solid transparent;font-size:13px;color:#666;white-space:nowrap;user-select:none}
+.tab{padding:11px 15px;cursor:pointer;border-bottom:3px solid transparent;font-size:12px;color:#666;white-space:nowrap;user-select:none;flex-shrink:0}
 .tab.active{border-bottom-color:#1976d2;color:#1976d2;font-weight:600}
 .tab:hover:not(.active){color:#333;background:#f8f8f8}
-.cnt{background:#f0f0f0;color:#555;padding:1px 7px;border-radius:10px;font-size:10px;margin-left:5px;font-weight:600}
+.cnt{padding:1px 6px;border-radius:10px;font-size:10px;margin-left:4px;font-weight:700}
 .cnt.green{background:#e8f5e9;color:#2e7d32}
 .cnt.orange{background:#fff3e0;color:#e65100}
 .cnt.red{background:#ffebee;color:#c62828}
+.cnt.blue{background:#e3f2fd;color:#1565c0}
+.cnt.deeporange{background:#fbe9e7;color:#bf360c}
 
-.content{padding:20px 24px;max-width:1000px}
+.content{padding:18px 24px;max-width:1020px}
 .tab-panel{display:none}.tab-panel.active{display:block}
 
-.stats{display:flex;gap:12px;margin-bottom:18px;flex-wrap:wrap}
-.stat{flex:1;min-width:120px;background:#fff;border-radius:8px;padding:14px 16px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
-.stat .num{font-size:26px;font-weight:700;line-height:1}
-.stat .lbl{font-size:11px;color:#888;margin-top:3px;text-transform:uppercase;letter-spacing:.4px}
+.stats{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap}
+.stat{flex:1;min-width:100px;background:#fff;border-radius:8px;padding:12px 14px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.stat .num{font-size:24px;font-weight:700;line-height:1}
+.stat .lbl{font-size:10px;color:#888;margin-top:3px;text-transform:uppercase;letter-spacing:.5px}
 .stat.green .num{color:#2e7d32}.stat.orange .num{color:#e65100}
-.stat.red .num{color:#c62828}.stat.grey .num{color:#555}.stat.purple .num{color:#6a1b9a}
+.stat.red .num{color:#c62828}.stat.grey .num{color:#555}
+.stat.blue .num{color:#1565c0}.stat.deeporange .num{color:#bf360c}
 
-.prog-wrap{margin-bottom:18px}
-.prog-bar{height:6px;background:#e0e0e0;border-radius:3px;overflow:hidden}
+.prog-wrap{margin-bottom:14px}
+.prog-bar{height:5px;background:#e0e0e0;border-radius:3px;overflow:hidden}
 .prog-fill{height:100%;background:linear-gradient(90deg,#1976d2,#42a5f5);border-radius:3px}
 .prog-label{font-size:11px;color:#888;margin-top:4px}
 
-.cycle-info{background:#fff;border-radius:7px;padding:11px 14px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,.07);font-size:12px;color:#555}
+.cycle-info{background:#fff;border-radius:7px;padding:10px 14px;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.07);font-size:12px;color:#555}
+.section-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:#999;margin-bottom:8px;margin-top:14px}
 
-.section-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:#999;margin-bottom:8px;margin-top:16px}
-
-.job-card{background:#fff;border-radius:7px;padding:11px 14px;margin-bottom:7px;box-shadow:0 1px 3px rgba(0,0,0,.07);border-left:4px solid #4caf50;display:flex;justify-content:space-between;align-items:center;gap:10px}
+.job-card{background:#fff;border-radius:7px;padding:10px 13px;margin-bottom:6px;box-shadow:0 1px 3px rgba(0,0,0,.07);border-left:4px solid #4caf50;display:flex;justify-content:space-between;align-items:center;gap:10px}
 .job-card.orange{border-left-color:#ff9800}
 .job-card.red{border-left-color:#f44336}
 .job-card.grey{border-left-color:#bdbdbd}
 .job-card.purple{border-left-color:#9c27b0}
+.job-card.blue{border-left-color:#1976d2}
+.job-card.deeporange{border-left-color:#e64a19}
 .job-card .left h4{font-size:13px;font-weight:600;margin-bottom:3px}
 .job-card .left h4 span{color:#888;font-weight:400}
-.job-card .meta{font-size:11px;color:#888;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.meta{font-size:11px;color:#888;display:flex;gap:7px;align-items:center;flex-wrap:wrap}
 
 .badge{display:inline-block;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:600}
 .badge.li{background:#e3f2fd;color:#1565c0}
-.badge.nk{background:#fce4ec;color:#c62828}
+.badge.nk{background:#fbe9e7;color:#bf360c}
 .badge.auto{background:#fff9c4;color:#8d6e00}
 .badge.pinned{background:#ede7f6;color:#4527a0}
 .badge.skipped{background:#f5f5f5;color:#757575}
 .badge.reason{background:#ffebee;color:#c62828}
 
-.pin-btn{background:#fff8e1;border:1px solid #ffc107;color:#e65100;border-radius:5px;padding:4px 10px;font-size:11px;cursor:pointer;white-space:nowrap;flex-shrink:0}
+.link-direct{color:#1976d2;font-size:11px}
+.link-search{color:#aaa;font-size:11px;font-style:italic}
+
+.pin-btn{background:#fff8e1;border:1px solid #ffc107;color:#e65100;border-radius:5px;padding:4px 9px;font-size:11px;cursor:pointer;white-space:nowrap;flex-shrink:0}
 .pin-btn:hover{background:#ffecb3}
-.unpin-btn{background:#fce4ec;border:1px solid #ef9a9a;color:#c62828;border-radius:5px;padding:4px 10px;font-size:11px;cursor:pointer;white-space:nowrap;flex-shrink:0}
+.unpin-btn{background:#fce4ec;border:1px solid #ef9a9a;color:#c62828;border-radius:5px;padding:4px 9px;font-size:11px;cursor:pointer;white-space:nowrap;flex-shrink:0}
 .unpin-btn:hover{background:#ffcdd2}
 
-.search-bar{background:#fff;border:1px solid #e0e0e0;border-radius:6px;padding:8px 12px;width:100%;margin-bottom:12px;font-size:13px;outline:none}
+.search-bar{background:#fff;border:1px solid #e0e0e0;border-radius:6px;padding:7px 12px;width:100%;margin-bottom:11px;font-size:13px;outline:none}
 .search-bar:focus{border-color:#1976d2}
 
-.info-banner{border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:12px}
+.info-banner{border-radius:6px;padding:9px 13px;margin-bottom:11px;font-size:12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
 .info-banner.yellow{background:#fff8e1;border:1px solid #ffe082;color:#7b5800}
 .info-banner.red{background:#fce4ec;border:1px solid #f48fb1;color:#880e4f}
 .info-banner.grey{background:#f5f5f5;border:1px solid #e0e0e0;color:#555}
+.info-banner.blue{background:#e3f2fd;border:1px solid #90caf9;color:#0d47a1}
+.info-banner.deeporange{background:#fbe9e7;border:1px solid #ffab91;color:#bf360c}
 
-.empty{text-align:center;color:#bbb;padding:40px;font-size:13px}
+.empty{text-align:center;color:#bbb;padding:32px;font-size:13px}
 </style>
 </head>
 <body>
@@ -85,12 +104,31 @@ a:hover{text-decoration:underline}
     <span class="dot"></span>
     {% if last_modified %}Last updated: {{ last_modified }}{% else %}No data yet{% endif %}
   </div>
+  <div class="run-btns">
+    <form action="/run/linkedin" method="post" style="margin:0">
+      <button class="run-btn li" type="submit">▶ LinkedIn</button>
+    </form>
+    <form action="/run/naukri" method="post" style="margin:0">
+      <button class="run-btn nk" type="submit">▶ Naukri</button>
+    </form>
+    <form action="/run/both" method="post" style="margin:0">
+      <button class="run-btn both" type="submit">▶ Run Both</button>
+    </form>
+  </div>
 </div>
+
+{% if started %}
+<div class="alert success">
+  ✅ Agent started for <strong>{{ platform_started | title }}</strong> — a Chrome window will open shortly. Refresh this page after it finishes to see new results.
+</div>
+{% endif %}
 
 <div class="tabs">
   <div class="tab active" onclick="switchTab('overview',this)">📊 Overview</div>
   <div class="tab" onclick="switchTab('applied',this)">✅ Applied <span class="cnt green">{{ stats.applied }}</span></div>
   <div class="tab" onclick="switchTab('followup',this)">📋 Follow-up <span class="cnt orange">{{ stats.followup }}</span></div>
+  <div class="tab" onclick="switchTab('linkedin',this)">🔵 LinkedIn <span class="cnt blue">{{ stats.linkedin }}</span></div>
+  <div class="tab" onclick="switchTab('naukri',this)">🟠 Naukri <span class="cnt deeporange">{{ stats.naukri }}</span></div>
   <div class="tab" onclick="switchTab('manual',this)">⚠️ Manual <span class="cnt red">{{ stats.manual }}</span></div>
   <div class="tab" onclick="switchTab('skipped',this)">⏭ Skipped <span class="cnt">{{ stats.skipped }}</span></div>
 </div>
@@ -102,8 +140,9 @@ a:hover{text-decoration:underline}
     <div class="stats">
       <div class="stat green"><div class="num">{{ stats.applied }}</div><div class="lbl">Applied</div></div>
       <div class="stat orange"><div class="num">{{ stats.followup }}</div><div class="lbl">Follow-up</div></div>
-      <div class="stat red"><div class="num">{{ stats.failed }}</div><div class="lbl">Failed</div></div>
-      <div class="stat purple"><div class="num">{{ stats.manual }}</div><div class="lbl">Manual</div></div>
+      <div class="stat blue"><div class="num">{{ stats.linkedin }}</div><div class="lbl">LinkedIn</div></div>
+      <div class="stat deeporange"><div class="num">{{ stats.naukri }}</div><div class="lbl">Naukri</div></div>
+      <div class="stat red"><div class="num">{{ stats.manual }}</div><div class="lbl">Manual</div></div>
       <div class="stat grey"><div class="num">{{ stats.skipped }}</div><div class="lbl">Skipped</div></div>
       <div class="stat grey"><div class="num">{{ stats.total }}</div><div class="lbl">Total</div></div>
     </div>
@@ -112,26 +151,28 @@ a:hover{text-decoration:underline}
       <div class="prog-label">Applied rate: {{ stats.rate }}% ({{ stats.applied }} of {{ stats.total }})</div>
     </div>
     {% if last_modified %}
-    <div class="cycle-info">🕒 <strong>Last updated:</strong> {{ last_modified }}</div>
+    <div class="cycle-info">🕒 <strong>Last updated:</strong> {{ last_modified }} &nbsp;·&nbsp; Use <strong>▶ LinkedIn</strong>, <strong>▶ Naukri</strong>, or <strong>▶ Run Both</strong> above to trigger a new cycle.</div>
     {% endif %}
     <div class="section-label">Recent Activity</div>
     {% for job in recent %}
-      {% set s = job.status | lower %}
-      <div class="job-card {% if s == 'applied' %}{% elif 'skip' in s %}grey{% else %}red{% endif %}">
+      {% set s = (job.status or '') | lower %}
+      <div class="job-card {% if 'skip' in s %}grey{% elif s in ('failed', 'skipped_account_wall', 'skipped_hard_stop') %}red{% endif %}">
         <div class="left">
-          <h4>{{ job.title }} <span>{% if job.company %}@ {{ job.company }}{% endif %}</span></h4>
+          <h4>{{ job.title or 'Unknown' }} <span>{% if job.company %}@ {{ job.company }}{% endif %}</span></h4>
           <div class="meta">
-            <span class="badge {% if job.platform == 'linkedin' %}li{% else %}nk{% endif %}">
-              {{ job.platform | upper | truncate(2, True, '') }}
-            </span>
+            <span class="badge {% if job.platform == 'linkedin' %}li{% else %}nk{% endif %}">{{ (job.platform or 'NK') | upper | truncate(2, True, '') }}</span>
             <span>{{ job.status }}</span>
             {% if job.applied_at %}<span>{{ job.applied_at[:10] }}</span>{% endif %}
-            {% if job.url %}<a href="{{ job.url }}" target="_blank">View Job ↗</a>{% endif %}
+            {% if job.link %}
+              <a href="{{ job.link }}" target="_blank" class="{% if job.link_is_direct %}link-direct{% else %}link-search{% endif %}">
+                {% if job.link_is_direct %}View Job ↗{% else %}Search similar ↗{% endif %}
+              </a>
+            {% endif %}
           </div>
         </div>
       </div>
     {% else %}
-      <div class="empty">No activity yet. Start the daemon to begin applying.</div>
+      <div class="empty">No activity yet. Click ▶ Run Both to start applying.</div>
     {% endfor %}
   </div>
 
@@ -140,21 +181,25 @@ a:hover{text-decoration:underline}
     <input class="search-bar" id="applied-search" placeholder="🔍  Search by title or company..." oninput="filterCards('applied-list', this.value)">
     <div id="applied-list">
     {% for job in applied %}
-      <div class="job-card" data-search="{{ job.title | lower }} {{ job.company | lower }}">
+      <div class="job-card" data-search="{{ (job.title or '') | lower }} {{ (job.company or '') | lower }}">
         <div class="left">
           <h4>{{ job.title }} <span>{% if job.company %}@ {{ job.company }}{% endif %}</span></h4>
           <div class="meta">
-            <span class="badge {% if job.platform == 'linkedin' %}li{% else %}nk{% endif %}">{{ job.platform | upper | truncate(2, True, '') }}</span>
+            <span class="badge {% if job.platform == 'linkedin' %}li{% else %}nk{% endif %}">{{ (job.platform or '') | upper | truncate(2, True, '') }}</span>
             {% if job.applied_at %}<span>{{ job.applied_at[:10] }}</span>{% endif %}
-            {% if job.url %}<a href="{{ job.url }}" target="_blank">View Job ↗</a>{% endif %}
+            {% if job.link %}
+              <a href="{{ job.link }}" target="_blank" class="{% if job.link_is_direct %}link-direct{% else %}link-search{% endif %}">
+                {% if job.link_is_direct %}View Job ↗{% else %}Search similar ↗{% endif %}
+              </a>
+            {% endif %}
           </div>
         </div>
         <form action="/pin/{{ job.id }}" method="post" style="margin:0">
-          <button class="pin-btn" type="submit">📌 Mark Follow-up</button>
+          <button class="pin-btn" type="submit">📌 Follow-up</button>
         </form>
       </div>
     {% else %}
-      <div class="empty">No applied jobs yet.</div>
+      <div class="empty">No applied jobs yet. Click ▶ Run Both to start.</div>
     {% endfor %}
     </div>
   </div>
@@ -162,7 +207,7 @@ a:hover{text-decoration:underline}
   {# FOLLOW-UP #}
   <div class="tab-panel" id="tab-followup">
     <div class="info-banner yellow">
-      ⏰ <strong>Auto-flagged</strong> = applied 7+ days ago &nbsp;·&nbsp; 📌 <strong>Pinned</strong> = manually marked by you
+      <span>⏰ <strong>Auto-flagged</strong> = applied 7+ days ago &nbsp;·&nbsp; 📌 <strong>Pinned</strong> = manually marked by you</span>
     </div>
     {% for job in followups %}
       {% set is_pinned = job.pinned %}
@@ -170,13 +215,15 @@ a:hover{text-decoration:underline}
         <div class="left">
           <h4>{{ job.title }} <span>{% if job.company %}@ {{ job.company }}{% endif %}</span></h4>
           <div class="meta">
-            <span class="badge {% if job.platform == 'linkedin' %}li{% else %}nk{% endif %}">{{ job.platform | upper | truncate(2, True, '') }}</span>
-            {% if is_pinned %}
-              <span class="badge pinned">📌 pinned</span>
-            {% elif job.days_ago is not none %}
-              <span class="badge auto">⏰ auto · {{ job.days_ago }}d</span>
+            <span class="badge {% if job.platform == 'linkedin' %}li{% else %}nk{% endif %}">{{ (job.platform or '') | upper | truncate(2, True, '') }}</span>
+            {% if is_pinned %}<span class="badge pinned">📌 pinned</span>
+            {% elif job.days_ago is not none %}<span class="badge auto">⏰ auto · {{ job.days_ago }}d</span>
             {% endif %}
-            {% if job.url %}<a href="{{ job.url }}" target="_blank">View Job ↗</a>{% endif %}
+            {% if job.link %}
+              <a href="{{ job.link }}" target="_blank" class="{% if job.link_is_direct %}link-direct{% else %}link-search{% endif %}">
+                {% if job.link_is_direct %}View Job ↗{% else %}Search similar ↗{% endif %}
+              </a>
+            {% endif %}
           </div>
         </div>
         <form action="/unpin/{{ job.id }}" method="post" style="margin:0">
@@ -188,19 +235,91 @@ a:hover{text-decoration:underline}
     {% endfor %}
   </div>
 
+  {# LINKEDIN #}
+  <div class="tab-panel" id="tab-linkedin">
+    <div class="info-banner blue">
+      <span>🔵 All jobs processed from <strong>LinkedIn</strong> — applied, skipped, manual.</span>
+      <form action="/run/linkedin" method="post" style="margin:0">
+        <button class="run-btn li sm" type="submit">▶ Run LinkedIn now</button>
+      </form>
+    </div>
+    <input class="search-bar" id="li-search" placeholder="🔍  Search LinkedIn jobs..." oninput="filterCards('li-list', this.value)">
+    <div id="li-list">
+    {% for job in linkedin_jobs %}
+      {% set s = (job.status or '') | lower %}
+      <div class="job-card {% if s == 'applied' %}blue{% elif 'skip' in s %}grey{% else %}red{% endif %}"
+           data-search="{{ (job.title or '') | lower }} {{ (job.company or '') | lower }}">
+        <div class="left">
+          <h4>{{ job.title }} <span>{% if job.company %}@ {{ job.company }}{% endif %}</span></h4>
+          <div class="meta">
+            <span class="badge li">LI</span>
+            <span>{{ job.status }}</span>
+            {% if job.score is not none %}<span class="badge skipped">{{ job.score }}/10</span>{% endif %}
+            {% if job.applied_at %}<span>{{ job.applied_at[:10] }}</span>{% endif %}
+            {% if job.link %}
+              <a href="{{ job.link }}" target="_blank" class="{% if job.link_is_direct %}link-direct{% else %}link-search{% endif %}">
+                {% if job.link_is_direct %}View Job ↗{% else %}Search similar ↗{% endif %}
+              </a>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    {% else %}
+      <div class="empty">No LinkedIn jobs yet. Click ▶ Run LinkedIn now.</div>
+    {% endfor %}
+    </div>
+  </div>
+
+  {# NAUKRI #}
+  <div class="tab-panel" id="tab-naukri">
+    <div class="info-banner deeporange">
+      <span>🟠 All jobs processed from <strong>Naukri</strong> — applied, skipped, manual.</span>
+      <form action="/run/naukri" method="post" style="margin:0">
+        <button class="run-btn nk sm" type="submit">▶ Run Naukri now</button>
+      </form>
+    </div>
+    <input class="search-bar" id="nk-search" placeholder="🔍  Search Naukri jobs..." oninput="filterCards('nk-list', this.value)">
+    <div id="nk-list">
+    {% for job in naukri_jobs %}
+      {% set s = (job.status or '') | lower %}
+      <div class="job-card {% if s == 'applied' %}deeporange{% elif 'skip' in s %}grey{% else %}red{% endif %}"
+           data-search="{{ (job.title or '') | lower }} {{ (job.company or '') | lower }}">
+        <div class="left">
+          <h4>{{ job.title }} <span>{% if job.company %}@ {{ job.company }}{% endif %}</span></h4>
+          <div class="meta">
+            <span class="badge nk">NK</span>
+            <span>{{ job.status }}</span>
+            {% if job.score is not none %}<span class="badge skipped">{{ job.score }}/10</span>{% endif %}
+            {% if job.applied_at %}<span>{{ job.applied_at[:10] }}</span>{% endif %}
+            {% if job.link %}
+              <a href="{{ job.link }}" target="_blank" class="{% if job.link_is_direct %}link-direct{% else %}link-search{% endif %}">
+                {% if job.link_is_direct %}View Job ↗{% else %}Search similar ↗{% endif %}
+              </a>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    {% else %}
+      <div class="empty">No Naukri jobs yet. Click ▶ Run Naukri now.</div>
+    {% endfor %}
+    </div>
+  </div>
+
   {# MANUAL #}
   <div class="tab-panel" id="tab-manual">
     <div class="info-banner red">
-      ⚠️ The agent could not apply to these jobs automatically — they need your manual attention.
+      <span>⚠️ The agent could not apply automatically — these need your manual attention.</span>
     </div>
     {% for job in manual %}
       <div class="job-card red">
         <div class="left">
           <h4>{{ job.title }} <span>{% if job.company %}@ {{ job.company }}{% endif %}</span></h4>
           <div class="meta">
-            <span class="badge {% if job.platform == 'linkedin' %}li{% else %}nk{% endif %}">{{ job.platform | upper | truncate(2, True, '') }}</span>
-            <span class="badge reason">{{ job.status | replace('_', ' ') | title }}</span>
-            {% if job.url %}<a href="{{ job.url }}" target="_blank">Apply Manually ↗</a>{% endif %}
+            <span class="badge {% if job.platform == 'linkedin' %}li{% else %}nk{% endif %}">{{ (job.platform or '') | upper | truncate(2, True, '') }}</span>
+            <span class="badge reason">{{ (job.status or '') | replace('_', ' ') | title }}</span>
+            {% if job.link %}
+              <a href="{{ job.link }}" target="_blank" class="link-direct">Apply Manually ↗</a>
+            {% endif %}
           </div>
         </div>
       </div>
@@ -212,17 +331,15 @@ a:hover{text-decoration:underline}
   {# SKIPPED #}
   <div class="tab-panel" id="tab-skipped">
     <div class="info-banner grey">
-      These jobs were skipped by the AI scorer (score &lt; 6/10).
+      <span>These jobs were skipped by the AI scorer (score &lt; 6/10).</span>
     </div>
     {% for job in skipped %}
       <div class="job-card grey">
         <div class="left">
           <h4>{{ job.title }} <span>{% if job.company %}@ {{ job.company }}{% endif %}</span></h4>
           <div class="meta">
-            <span class="badge {% if job.platform == 'linkedin' %}li{% else %}nk{% endif %}">{{ job.platform | upper | truncate(2, True, '') }}</span>
-            {% if job.score is not none %}
-              <span class="badge skipped">Score {{ job.score }}/10</span>
-            {% endif %}
+            <span class="badge {% if job.platform == 'linkedin' %}li{% else %}nk{% endif %}">{{ (job.platform or '') | upper | truncate(2, True, '') }}</span>
+            {% if job.score is not none %}<span class="badge skipped">Score {{ job.score }}/10</span>{% endif %}
             {% if job.applied_at %}<span>{{ job.applied_at[:10] }}</span>{% endif %}
           </div>
         </div>
@@ -240,12 +357,12 @@ function switchTab(name, el) {
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   el.classList.add('active');
   document.getElementById('tab-' + name).classList.add('active');
+  history.replaceState(null, '', '#tab-' + name);
 }
 function filterCards(listId, query) {
   const q = query.toLowerCase();
   document.querySelectorAll('#' + listId + ' .job-card').forEach(card => {
-    const text = card.dataset.search || '';
-    card.style.display = text.includes(q) ? '' : 'none';
+    card.style.display = (card.dataset.search || '').includes(q) ? '' : 'none';
   });
 }
 window.addEventListener('load', () => {
