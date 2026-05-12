@@ -163,27 +163,13 @@ class LinkedInAgent(JobBrowserAgent):
 
         # Step 1: Try JavaScript click in rapid bursts (catches SSR "Easy Apply" before React removes it)
         JS_CLICK = """() => {
-            const keywords = ['easy apply', 'apply'];
-            const btns = Array.from(document.querySelectorAll('button'));
-            // Prefer Easy Apply specifically, then any apply variant
-            const ordered = [
-                btns.find(b => {
-                    const t = b.textContent.trim().toLowerCase();
-                    const r = b.getBoundingClientRect();
-                    return r.width > 0 && t.includes('easy apply');
-                }),
-                btns.find(b => {
-                    const t = b.textContent.trim().toLowerCase();
-                    const r = b.getBoundingClientRect();
-                    return r.width > 0 && (t === 'apply' || t.startsWith('apply'));
-                }),
-                btns.find(b => {
-                    const t = b.textContent.trim().toLowerCase();
-                    const r = b.getBoundingClientRect();
-                    return r.width > 0 && t.includes('interested');
-                }),
-            ];
-            const btn = ordered.find(Boolean);
+            const vis = b => b.getBoundingClientRect().width > 0;
+            const btns = Array.from(document.querySelectorAll('button')).filter(vis);
+            // Priority: Easy Apply > Apply > I'm interested (works with Unicode apostrophe)
+            const btn =
+                btns.find(b => b.textContent.trim().toLowerCase().includes('easy apply')) ||
+                btns.find(b => { const t = b.textContent.trim().toLowerCase(); return t === 'apply' || t.startsWith('apply '); }) ||
+                btns.find(b => b.textContent.trim().toLowerCase().includes('interested'));
             if (btn) { btn.click(); return btn.textContent.trim().slice(0, 40); }
             return null;
         }"""
@@ -226,8 +212,15 @@ class LinkedInAgent(JobBrowserAgent):
                     return True, None
                 except Exception:
                     pass
-                # Still no modal — could be "I'm interested" that just needs confirmation
-                print(f"   ⚠️ Clicked '{clicked_text}' but no modal. Continuing...")
+                # No modal — check if "I'm interested" silently succeeded
+                try:
+                    page_text = await page.evaluate("() => document.body.innerText.toLowerCase()")
+                    if "expressed interest" in page_text or "you've expressed" in page_text:
+                        print(f"   ✅ 'I'm interested' registered (no modal needed)")
+                        return True, None  # _handle_modal will detect success text
+                except Exception:
+                    pass
+                print(f"   ⚠️ Clicked '{clicked_text}' but no modal/confirmation yet. Continuing...")
                 return True, None
 
             await asyncio.sleep(0.3)
@@ -237,20 +230,28 @@ class LinkedInAgent(JobBrowserAgent):
 
     async def _handle_easy_apply_modal(self, page, profile, resume_pdf_path, filler) -> str:
         """Step through the Easy Apply modal or I'm interested dialog. Returns outcome string."""
-        await page.wait_for_timeout(1000)
+        await page.wait_for_timeout(1500)
 
-        # Handle "I'm interested" confirmation — just click "I'm interested" or "Done"
-        for interested_sel in [
-            'button:has-text("I\'m interested")',
-            'button:has-text("Done")',
-            'button:has-text("Confirm")',
+        # Check for "I'm interested" success — LinkedIn India silently registers interest
+        # with no modal; page shows "You've expressed interest in..." confirmation text
+        try:
+            page_text = await page.evaluate("() => document.body.innerText.toLowerCase()")
+            if "expressed interest" in page_text or "you've expressed" in page_text:
+                print("   ✅ 'I'm interested' registered — confirmed by page text!")
+                return "applied"
+        except Exception:
+            pass
+
+        # Handle "Done" / "Confirm" buttons inside any confirmation dialog
+        for btn_js in [
+            "Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim().toLowerCase() === 'done')",
+            "Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim().toLowerCase() === 'confirm')",
         ]:
             try:
-                btn = page.locator(interested_sel).first
-                if await btn.count() > 0 and await btn.is_visible():
-                    print(f"   ✅ Confirming 'I'm interested'...")
-                    await btn.click()
-                    await page.wait_for_timeout(2000)
+                clicked = await page.evaluate(f"() => {{ const b = {btn_js}; if (b && b.getBoundingClientRect().width > 0) {{ b.click(); return true; }} return false; }}")
+                if clicked:
+                    print("   ✅ Clicked confirmation button")
+                    await page.wait_for_timeout(1500)
                     return "applied"
             except Exception:
                 pass
