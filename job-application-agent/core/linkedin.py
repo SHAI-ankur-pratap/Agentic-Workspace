@@ -96,9 +96,9 @@ class LinkedInAgent(JobBrowserAgent):
                 continue
         return "UnknownCompany"
 
-    async def _click_easy_apply(self, page) -> bool:
-        """Click the Easy Apply button using Playwright's native click (not JS). Returns True if modal opened."""
-        # Multiple selectors LinkedIn uses for the Easy Apply button
+    async def _click_easy_apply(self, page, context) -> tuple:
+        """Click the Easy Apply button. Returns (success, external_page).
+        external_page is None for Easy Apply modal, or a Page object for external redirects."""
         selectors = [
             'button.jobs-apply-button',
             'button[data-control-name="jobdetails_topcard_inapply"]',
@@ -109,27 +109,46 @@ class LinkedInAgent(JobBrowserAgent):
         for sel in selectors:
             try:
                 btn = page.locator(sel).first
-                if await btn.count() > 0 and await btn.is_visible():
-                    print(f"   🖱️ Clicking Apply button ({sel})...")
-                    await btn.click()
-                    # Wait for modal to appear
-                    try:
-                        await page.wait_for_selector(
-                            '[data-test-modal], [role="dialog"], .jobs-easy-apply-modal',
-                            timeout=5000
-                        )
-                        print("   ✅ Easy Apply modal opened!")
-                        return True
-                    except Exception:
-                        # Button clicked but modal didn't open — might be external redirect
-                        await page.wait_for_timeout(2000)
-                        if "linkedin.com" not in page.url:
-                            return True  # External redirect
-                        return False
+                if await btn.count() == 0 or not await btn.is_visible():
+                    continue
+                print(f"   🖱️ Clicking Apply button...")
+
+                # Try to catch a new tab opening (external company site)
+                try:
+                    async with context.expect_page(timeout=4000) as new_page_info:
+                        await btn.click()
+                    ext_page = await new_page_info.value
+                    await ext_page.wait_for_load_state("domcontentloaded", timeout=15000)
+                    print(f"   🔗 Opened external site in new tab: {ext_page.url}")
+                    return True, ext_page
+                except Exception:
+                    pass  # No new tab — fall through to modal/same-page check
+
+                # Check for Easy Apply modal on current page
+                try:
+                    await page.wait_for_selector(
+                        '[data-test-modal], [role="dialog"], .jobs-easy-apply-modal',
+                        timeout=5000,
+                    )
+                    print("   ✅ Easy Apply modal opened!")
+                    return True, None
+                except Exception:
+                    pass
+
+                # Same-page URL redirect (rare on LinkedIn)
+                await page.wait_for_timeout(2000)
+                if "linkedin.com" not in page.url:
+                    print(f"   🔗 Redirected on same page: {page.url}")
+                    return True, page
+
+                print(f"  ⚠️ Button clicked but nothing opened for selector: {sel}")
+                return False, None
+
             except Exception:
                 continue
+
         print("  ⚠️ Easy Apply button not found on this job.")
-        return False
+        return False, None
 
     async def _handle_easy_apply_modal(self, page, profile, resume_pdf_path, filler) -> str:
         """Step through the Easy Apply modal, filling each screen. Returns outcome string."""
@@ -247,17 +266,26 @@ class LinkedInAgent(JobBrowserAgent):
             await tailor.generate_pdf(tailored_md, cv_path)
             filler = UniversalFormFiller(profile)
 
+            ext_page = None
             try:
-                modal_opened = await self._click_easy_apply(page)
-                if modal_opened:
-                    outcome = await self._handle_easy_apply_modal(page, profile, cv_path, filler)
-                else:
+                modal_opened, ext_page = await self._click_easy_apply(page, context)
+                if not modal_opened:
                     print("⚠️ Easy Apply button not found or modal did not open.")
                     outcome = "failed"
+                elif ext_page is not None:
+                    portal = ExternalPortalAgent(profile, filler)
+                    outcome = await portal.apply(ext_page, ext_page.url, cv_path)
+                else:
+                    outcome = await self._handle_easy_apply_modal(page, profile, cv_path, filler)
             except Exception as e:
                 print(f"⚠️ Apply error: {e}")
                 outcome = "failed"
             finally:
+                if ext_page is not None and ext_page != page:
+                    try:
+                        await ext_page.close()
+                    except Exception:
+                        pass
                 if os.path.exists(cv_path):
                     os.remove(cv_path)
 
@@ -363,17 +391,18 @@ class LinkedInAgent(JobBrowserAgent):
                         await tailor.generate_pdf(tailored_md, cv_path)
 
                         outcome = "failed"
+                        ext_page = None
                         try:
-                            modal_opened = await self._click_easy_apply(page)
+                            modal_opened, ext_page = await self._click_easy_apply(page, context)
 
                             if not modal_opened:
-                                print(f"  ⚠️ Could not open Easy Apply for: {title[:40]}")
+                                print(f"  ⚠️ Could not open Apply for: {title[:40]}")
                                 outcome = "failed"
-                            elif "linkedin.com" not in page.url:
-                                # Redirected to external company site
+                            elif ext_page is not None:
+                                # External company portal opened (new tab or redirect)
                                 filler = UniversalFormFiller(profile)
                                 portal = ExternalPortalAgent(profile, filler)
-                                outcome = await portal.apply(page, page.url, cv_path)
+                                outcome = await portal.apply(ext_page, ext_page.url, cv_path)
                             else:
                                 # Easy Apply modal is open on LinkedIn
                                 filler = UniversalFormFiller(profile)
@@ -385,6 +414,11 @@ class LinkedInAgent(JobBrowserAgent):
                             print(f"  ⚠️ Apply error: {e}")
                             outcome = "failed"
                         finally:
+                            if ext_page is not None and ext_page != page:
+                                try:
+                                    await ext_page.close()
+                                except Exception:
+                                    pass
                             if os.path.exists(cv_path):
                                 os.remove(cv_path)
 
