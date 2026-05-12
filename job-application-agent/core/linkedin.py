@@ -94,11 +94,15 @@ class LinkedInAgent(JobBrowserAgent):
             await browser.close()
 
     async def _extract_jd(self, page) -> str:
+        # Ordered by most reliable on current LinkedIn DOM (verified May 2026)
         for sel in [
-            ".jobs-description-content__text",
+            ".show-more-less-html__markup",        # current logged-in view
+            ".description__text",                   # public job page
+            ".jobs-description-content__text",      # older logged-in view
             ".jobs-box__html-content",
-            ".job-view-layout",
             "#job-details",
+            "[class*='description__text']",
+            "[class*='show-more-less-html']",
         ]:
             try:
                 el = await page.query_selector(sel)
@@ -108,13 +112,28 @@ class LinkedInAgent(JobBrowserAgent):
                         return text[:3000]
             except Exception:
                 continue
+        # Last resort: grab the largest text block on the page
+        try:
+            text = await page.evaluate("""() => {
+                const blocks = Array.from(document.querySelectorAll('p, li, div'))
+                    .filter(el => el.children.length === 0 && el.textContent.trim().length > 80)
+                    .map(el => el.textContent.trim());
+                return blocks.slice(0, 30).join(' ');
+            }""")
+            if text and len(text) > 100:
+                return text[:3000]
+        except Exception:
+            pass
         return ""
 
     async def _extract_company(self, page) -> str:
         for sel in [
+            ".topcard__org-name-link",              # public page (verified)
             ".jobs-unified-top-card__company-name",
-            ".topcard__org-name-link",
-            ".jobs-details-top-card__company-url",
+            ".top-card-layout__card a[data-tracking-control-name*='company']",
+            ".job-details-jobs-unified-top-card__company-name a",
+            "[class*='company-name'] a",
+            "[class*='org-name']",
         ]:
             try:
                 el = await page.query_selector(sel)
@@ -127,24 +146,44 @@ class LinkedInAgent(JobBrowserAgent):
     async def _click_easy_apply(self, page, context) -> tuple:
         """Click the Easy Apply button. Returns (success, external_page).
         external_page is None for Easy Apply modal, or a Page object for external redirects."""
+        # Selectors verified against current LinkedIn DOM (May 2026)
         selectors = [
-            'button.jobs-apply-button',
-            'button[data-control-name="jobdetails_topcard_inapply"]',
+            'button:has-text("Easy Apply")',                          # logged-in Easy Apply
+            'button.jobs-apply-button',                               # logged-in class
+            'button.apply-button',                                    # public page / some logged-in views
+            'button[data-tracking-control-name*="apply"]',            # data attr (robust)
+            'button[data-control-name="jobdetails_topcard_inapply"]', # older logged-in
             '.jobs-s-apply button',
-            'button:has-text("Easy Apply")',
-            'button:has-text("Apply")',
+            '.top-card-layout__cta button',                           # public page CTA
+            'button:has-text("Apply")',                               # fallback
         ]
         for sel in selectors:
             try:
                 btn = page.locator(sel).first
-                if await btn.count() == 0 or not await btn.is_visible():
+                if await btn.count() == 0:
                     continue
-                print(f"   🖱️ Clicking Apply button...")
+                # Try visible first; fall back to force-click (some btns fail is_visible() due to overlap)
+                visible = False
+                try:
+                    visible = await btn.is_visible()
+                except Exception:
+                    pass
+                if not visible:
+                    # Check via JS bounding box as fallback
+                    try:
+                        has_size = await page.evaluate(
+                            f"() => {{ const el = document.querySelector('{sel.replace(chr(39), chr(34))}'); return el ? el.getBoundingClientRect().width > 0 : false; }}"
+                        )
+                        if not has_size:
+                            continue
+                    except Exception:
+                        continue
+                print(f"   🖱️ Clicking Apply button ({sel})...")
 
                 # Try to catch a new tab opening (external company site)
                 try:
                     async with context.expect_page(timeout=4000) as new_page_info:
-                        await btn.click()
+                        await btn.click(force=True)
                     ext_page = await new_page_info.value
                     await ext_page.wait_for_load_state("domcontentloaded", timeout=15000)
                     print(f"   🔗 Opened external site in new tab: {ext_page.url}")
@@ -302,13 +341,17 @@ class LinkedInAgent(JobBrowserAgent):
             await page.wait_for_timeout(3000)
 
             cards = await page.evaluate("""() => {
-                const anchors = Array.from(document.querySelectorAll(
-                    'a.job-card-list__title--link, a[class*="job-card-list__title"], a[class*="base-search-card__title"]'
-                ));
+                // Use href-based selector — immune to LinkedIn class name changes
+                const anchors = Array.from(document.querySelectorAll('a[href*="/jobs/view/"]'));
+                const seen = new Set();
                 return anchors.map(a => ({
-                    title: a.textContent.trim(),
-                    href: (a.href || '').split('?')[0]
-                })).filter(j => j.title.length > 3 && j.href.includes('/jobs/view/'));
+                    title: (a.textContent || a.getAttribute('aria-label') || '').trim(),
+                    href: a.href.split('?')[0]
+                })).filter(j => {
+                    if (j.title.length < 3 || seen.has(j.href)) return false;
+                    seen.add(j.href);
+                    return true;
+                });
             }""")
 
             new_cards = 0
