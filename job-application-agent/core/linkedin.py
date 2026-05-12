@@ -94,10 +94,10 @@ class LinkedInAgent(JobBrowserAgent):
             await browser.close()
 
     async def _extract_jd(self, page) -> str:
-        # Ordered by most reliable on current LinkedIn DOM (verified May 2026)
+        # Ordered by reliability on current LinkedIn DOM (verified May 2026)
         for sel in [
-            ".show-more-less-html__markup",        # current logged-in view
-            ".description__text",                   # public job page
+            ".show-more-less-html__markup",        # current logged-in view (public pages)
+            ".description__text",                   # public job page fallback
             ".jobs-description-content__text",      # older logged-in view
             ".jobs-box__html-content",
             "#job-details",
@@ -112,13 +112,22 @@ class LinkedInAgent(JobBrowserAgent):
                         return text[:3000]
             except Exception:
                 continue
-        # Last resort: grab the largest text block on the page
+
+        # LinkedIn India "About the job" section — find by heading text, grab sibling/parent text
         try:
             text = await page.evaluate("""() => {
-                const blocks = Array.from(document.querySelectorAll('p, li, div'))
-                    .filter(el => el.children.length === 0 && el.textContent.trim().length > 80)
+                // Find the "About the job" section heading
+                const headings = Array.from(document.querySelectorAll('h2, h3, section, div'))
+                    .filter(el => el.textContent.trim() === 'About the job');
+                if (headings.length > 0) {
+                    const section = headings[0].closest('section') || headings[0].parentElement;
+                    if (section) return section.innerText.slice(0, 3000);
+                }
+                // Fallback: grab all substantial text blocks from the page body
+                const blocks = Array.from(document.querySelectorAll('p, li'))
+                    .filter(el => el.textContent.trim().length > 40)
                     .map(el => el.textContent.trim());
-                return blocks.slice(0, 30).join(' ');
+                return blocks.slice(0, 40).join(' ').slice(0, 3000);
             }""")
             if text and len(text) > 100:
                 return text[:3000]
@@ -144,80 +153,86 @@ class LinkedInAgent(JobBrowserAgent):
         return "UnknownCompany"
 
     async def _click_easy_apply(self, page, context) -> tuple:
-        """Click the Easy Apply button. Returns (success, external_page).
-        external_page is None for Easy Apply modal, or a Page object for external redirects."""
-        # Selectors verified against current LinkedIn DOM (May 2026)
-        selectors = [
-            'button:has-text("Easy Apply")',                          # logged-in Easy Apply
-            'button.jobs-apply-button',                               # logged-in class
-            'button.apply-button',                                    # public page / some logged-in views
-            'button[data-tracking-control-name*="apply"]',            # data attr (robust)
-            'button[data-control-name="jobdetails_topcard_inapply"]', # older logged-in
-            '.jobs-s-apply button',
-            '.top-card-layout__cta button',                           # public page CTA
-            'button:has-text("Apply")',                               # fallback
-            'button:has-text("I\'m interested")',                     # LinkedIn India personalised CTA
-        ]
-        for sel in selectors:
+        """Click Easy Apply via JavaScript immediately after page load — before React hydrates.
+        Returns (success, external_page)."""
+
+        MODAL_SEL = (
+            '[data-test-modal], [role="dialog"], '
+            '.jobs-easy-apply-modal, .artdeco-modal'
+        )
+
+        # Step 1: Try JavaScript click in rapid bursts (catches SSR "Easy Apply" before React removes it)
+        JS_CLICK = """() => {
+            const keywords = ['easy apply', 'apply'];
+            const btns = Array.from(document.querySelectorAll('button'));
+            // Prefer Easy Apply specifically, then any apply variant
+            const ordered = [
+                btns.find(b => {
+                    const t = b.textContent.trim().toLowerCase();
+                    const r = b.getBoundingClientRect();
+                    return r.width > 0 && t.includes('easy apply');
+                }),
+                btns.find(b => {
+                    const t = b.textContent.trim().toLowerCase();
+                    const r = b.getBoundingClientRect();
+                    return r.width > 0 && (t === 'apply' || t.startsWith('apply'));
+                }),
+                btns.find(b => {
+                    const t = b.textContent.trim().toLowerCase();
+                    const r = b.getBoundingClientRect();
+                    return r.width > 0 && t.includes('interested');
+                }),
+            ];
+            const btn = ordered.find(Boolean);
+            if (btn) { btn.click(); return btn.textContent.trim().slice(0, 40); }
+            return null;
+        }"""
+
+        for burst in range(12):  # Try every 300ms for ~3.6s total
             try:
-                btn = page.locator(sel).first
-                if await btn.count() == 0:
-                    continue
-                # Try visible first; fall back to force-click (some btns fail is_visible() due to overlap)
-                visible = False
-                try:
-                    visible = await btn.is_visible()
-                except Exception:
-                    pass
-                if not visible:
-                    # Check via JS bounding box as fallback
-                    try:
-                        has_size = await page.evaluate(
-                            f"() => {{ const el = document.querySelector('{sel.replace(chr(39), chr(34))}'); return el ? el.getBoundingClientRect().width > 0 : false; }}"
-                        )
-                        if not has_size:
-                            continue
-                    except Exception:
-                        continue
-                print(f"   🖱️ Clicking Apply button ({sel})...")
+                async with context.expect_page(timeout=800) as new_page_info:
+                    clicked_text = await page.evaluate(JS_CLICK)
+                    if not clicked_text:
+                        raise Exception("no button")
+                ext_page = await new_page_info.value
+                await ext_page.wait_for_load_state("domcontentloaded", timeout=15000)
+                print(f"   🔗 Clicked '{clicked_text}' → external tab: {ext_page.url}")
+                return True, ext_page
+            except Exception:
+                pass
 
-                # Try to catch a new tab opening (external company site)
-                try:
-                    async with context.expect_page(timeout=4000) as new_page_info:
-                        await btn.click(force=True)
-                    ext_page = await new_page_info.value
-                    await ext_page.wait_for_load_state("domcontentloaded", timeout=15000)
-                    print(f"   🔗 Opened external site in new tab: {ext_page.url}")
-                    return True, ext_page
-                except Exception:
-                    pass  # No new tab — fall through to modal/same-page check
+            try:
+                clicked_text = await page.evaluate(JS_CLICK)
+            except Exception:
+                clicked_text = None
 
-                # Check for Easy Apply modal or "I'm interested" confirmation
-                MODAL_SEL = (
-                    '[data-test-modal], [role="dialog"], '
-                    '.jobs-easy-apply-modal, .artdeco-modal, '
-                    '.jobs-apply-button__container'
-                )
+            if clicked_text:
+                print(f"   🖱️ Clicked '{clicked_text}' via JS (burst {burst + 1})")
+                # Check if modal appeared
                 try:
-                    await page.wait_for_selector(MODAL_SEL, timeout=5000)
-                    print("   ✅ Apply modal / dialog opened!")
+                    await page.wait_for_selector(MODAL_SEL, timeout=3000)
+                    print("   ✅ Modal opened!")
                     return True, None
                 except Exception:
                     pass
-
-                # Same-page URL redirect (rare on LinkedIn)
-                await page.wait_for_timeout(2000)
+                # Check URL change
                 if "linkedin.com" not in page.url:
-                    print(f"   🔗 Redirected on same page: {page.url}")
                     return True, page
+                # Clicked something — might just need more time
+                await asyncio.sleep(0.5)
+                try:
+                    await page.wait_for_selector(MODAL_SEL, timeout=2000)
+                    print("   ✅ Modal appeared after delay!")
+                    return True, None
+                except Exception:
+                    pass
+                # Still no modal — could be "I'm interested" that just needs confirmation
+                print(f"   ⚠️ Clicked '{clicked_text}' but no modal. Continuing...")
+                return True, None
 
-                print(f"  ⚠️ Button clicked but nothing opened for selector: {sel}")
-                return False, None
+            await asyncio.sleep(0.3)
 
-            except Exception:
-                continue
-
-        print("  ⚠️ Easy Apply button not found on this job.")
+        print("  ⚠️ No apply button found in 3.6s burst window.")
         return False, None
 
     async def _handle_easy_apply_modal(self, page, profile, resume_pdf_path, filler) -> str:
@@ -413,22 +428,9 @@ class LinkedInAgent(JobBrowserAgent):
             await job_page.close()
             return "failed"
 
-        # Wait for an apply-type button to appear (catches SSR before React hydrates)
-        APPLY_BTN_SELECTOR = (
-            'button:has-text("Easy Apply"), '
-            'button.apply-button, '
-            'button.jobs-apply-button, '
-            'button:has-text("Apply"), '
-            'button:has-text("I\'m interested")'
-        )
-        try:
-            await job_page.wait_for_selector(APPLY_BTN_SELECTOR, timeout=8000)
-        except Exception:
-            print(f"  ⚠️ No apply button appeared within 8s")
-
-        # Scroll down to load full JD (LinkedIn lazy-loads description)
-        await job_page.evaluate("window.scrollBy(0, 400)")
-        await job_page.wait_for_timeout(1500)
+        # Extract JD and company WHILE trying to click Apply in parallel bursts.
+        # Scroll slightly to trigger lazy-loading of description.
+        await job_page.evaluate("window.scrollBy(0, 300)")
 
         jd = await self._extract_jd(job_page)
         company = await self._extract_company(job_page)
