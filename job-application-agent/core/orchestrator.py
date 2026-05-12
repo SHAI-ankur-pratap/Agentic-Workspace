@@ -1,8 +1,32 @@
 import schedule
 import time
 import asyncio
+import threading
 from core.linkedin import LinkedInAgent
 from core.naukri import NaukriAgent
+
+
+def _run_async(coro):
+    """Run a coroutine in a fresh event loop in a new thread — safe from schedule callbacks."""
+    result = {}
+
+    def _thread():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result["stats"] = loop.run_until_complete(coro)
+        except Exception as e:
+            result["error"] = e
+        finally:
+            loop.close()
+
+    t = threading.Thread(target=_thread)
+    t.start()
+    t.join()
+
+    if "error" in result:
+        raise result["error"]
+    return result.get("stats", {})
 
 
 class DaemonOrchestrator:
@@ -18,7 +42,7 @@ class DaemonOrchestrator:
 
         try:
             linkedin = LinkedInAgent(headless=True)
-            stats = asyncio.run(linkedin.autonomous_search_and_apply(self.profile))
+            stats = _run_async(linkedin.autonomous_search_and_apply(self.profile))
             for k in totals:
                 totals[k] += stats.get(k, 0)
         except Exception as e:
@@ -26,7 +50,7 @@ class DaemonOrchestrator:
 
         try:
             naukri = NaukriAgent(headless=True)
-            stats = asyncio.run(naukri.autonomous_search_and_apply(self.profile))
+            stats = _run_async(naukri.autonomous_search_and_apply(self.profile))
             for k in totals:
                 totals[k] += stats.get(k, 0)
         except Exception as e:

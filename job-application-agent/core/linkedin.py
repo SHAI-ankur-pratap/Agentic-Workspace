@@ -41,20 +41,47 @@ class LinkedInAgent(JobBrowserAgent):
             os.remove(self.state_file)
 
         print(f"🤖 Logging into LinkedIn as {self.email}...")
-        await page.goto(self.login_url, wait_until="domcontentloaded", timeout=60000)
-        await page.wait_for_timeout(2000)
-        await page.fill("input#username", self.email, timeout=15000)
-        await page.fill("input#password", self.password, timeout=15000)
-        await page.click("button[type='submit']")
+        try:
+            await page.goto(self.login_url, wait_until="domcontentloaded", timeout=60000)
+        except Exception as e:
+            print(f"⚠️ Login page load warning: {e} — continuing anyway")
+
+        # Wait for login form or already-logged-in feed
+        for _ in range(15):
+            await page.wait_for_timeout(1000)
+            current_url = page.url
+            if "feed" in current_url or "mynetwork" in current_url:
+                await page.context.storage_state(path=self.state_file)
+                print("✅ Already logged in!")
+                return True
+            username_field = await page.query_selector("input#username, input[name='session_key'], input[autocomplete='username']")
+            if username_field:
+                break
+        else:
+            print("⚠️ Login form not found after 15s. Taking screenshot.")
+            await page.screenshot(path="linkedin_login_error.png")
+            return False
+
+        try:
+            await username_field.fill(self.email)
+            pw_field = await page.query_selector("input#password, input[name='session_password'], input[type='password']")
+            if pw_field:
+                await pw_field.fill(self.password)
+            await page.click("button[type='submit'], button[data-litms-control-urn='login-submit']")
+        except Exception as e:
+            print(f"⚠️ Login form fill error: {e}")
+            await page.screenshot(path="linkedin_login_error.png")
+            return False
+
         print("⏳ Waiting 90s for 2FA approval on your phone...")
         await page.wait_for_timeout(90000)
 
-        if "feed" in page.url or "checkpoint" not in page.url:
+        if "feed" in page.url or ("linkedin.com" in page.url and "login" not in page.url and "checkpoint" not in page.url):
             await page.context.storage_state(path=self.state_file)
             print("✅ Login successful. Session saved.")
             return True
 
-        print("⚠️ Login blocked (CAPTCHA/OTP).")
+        print("⚠️ Login failed (CAPTCHA/OTP/timeout).")
         await page.screenshot(path="linkedin_login_error.png")
         return False
 
