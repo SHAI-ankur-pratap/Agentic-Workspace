@@ -23,14 +23,15 @@ SAMPLE_INPUTS = [
 
 
 def make_filler(mock_content):
-    with patch("core.form_filler.ChatGoogleGenerativeAI") as MockLLM:
-        mock_response = MagicMock()
-        mock_response.content = mock_content
-        MockLLM.return_value.invoke.return_value = mock_response
+    mock_llm = MagicMock()
+    mock_response = MagicMock()
+    mock_response.content = mock_content
+    mock_llm.invoke.return_value = mock_response
+    with patch("core.llm_client.build_llm", return_value=mock_llm):
         from core.form_filler import UniversalFormFiller
         filler = UniversalFormFiller(PROFILE)
-        filler.llm = MockLLM.return_value
-        return filler
+    filler.llm = mock_llm
+    return filler
 
 
 def test_skips_account_wall_on_workday():

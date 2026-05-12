@@ -12,14 +12,15 @@ PROFILE = {
 
 
 def make_scorer(mock_content):
-    with patch("core.job_scorer.ChatGoogleGenerativeAI") as MockLLM:
-        mock_response = MagicMock()
-        mock_response.content = mock_content
-        MockLLM.return_value.invoke.return_value = mock_response
+    mock_llm = MagicMock()
+    mock_response = MagicMock()
+    mock_response.content = mock_content
+    mock_llm.invoke.return_value = mock_response
+    with patch("core.llm_client.build_llm", return_value=mock_llm):
         from core.job_scorer import JobScorer
         scorer = JobScorer()
-        scorer.llm = MockLLM.return_value
-        return scorer
+    scorer.llm = mock_llm
+    return scorer
 
 
 def test_score_above_threshold_sets_apply_true():
@@ -30,8 +31,8 @@ def test_score_above_threshold_sets_apply_true():
 
 
 def test_score_below_threshold_sets_apply_false():
-    scorer = make_scorer('{"score": 4, "reason": "Junior role", "apply": false}')
-    result = scorer.score("Junior QA", "Manual testing only", PROFILE)
+    scorer = make_scorer('{"score": 2, "reason": "Unrelated role", "apply": false}')
+    result = scorer.score("Civil Engineer", "Construction projects", PROFILE)
     assert result["apply"] is False
 
 
@@ -42,14 +43,15 @@ def test_apply_field_overridden_by_threshold():
 
 
 def test_malformed_json_retries_and_defaults():
-    with patch("core.job_scorer.ChatGoogleGenerativeAI") as MockLLM:
-        mock_response = MagicMock()
-        mock_response.content = "not json at all"
-        MockLLM.return_value.invoke.return_value = mock_response
+    mock_llm = MagicMock()
+    mock_response = MagicMock()
+    mock_response.content = "not json at all"
+    mock_llm.invoke.return_value = mock_response
+    with patch("core.llm_client.build_llm", return_value=mock_llm):
         from core.job_scorer import JobScorer
         scorer = JobScorer()
-        scorer.llm = MockLLM.return_value
-        result = scorer.score("QA Lead", "desc", PROFILE)
+    scorer.llm = mock_llm
+    result = scorer.score("QA Lead", "desc", PROFILE)
     assert result["apply"] is True
     assert result["score"] == 5
 

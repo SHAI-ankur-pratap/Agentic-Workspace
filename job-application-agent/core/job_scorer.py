@@ -7,7 +7,7 @@ from core.llm_client import build_llm
 
 load_dotenv()
 
-SCORE_THRESHOLD = 6
+SCORE_THRESHOLD = 3  # Apply broadly — include remotely related roles and career-adjacent opportunities
 
 
 class JobScorer:
@@ -20,7 +20,11 @@ class JobScorer:
         locations = profile.get("preferences", {}).get("locations", [])
         min_salary = profile.get("preferences", {}).get("minimum_salary", "")
 
-        prompt = f"""Evaluate this job posting for a candidate. Score the match 0-10.
+        prompt = f"""Evaluate this job posting for a candidate. Score 0-10 — be GENEROUS.
+
+Apply broadly: include roles that are remotely related, adjacent to the candidate's career path,
+or where their skills would transfer. Only score below 3 if the role is completely unrelated
+(e.g. civil engineering for a software QA candidate).
 
 Candidate preferred roles: {', '.join(roles)}
 Candidate skills: {', '.join(skills)}
@@ -30,8 +34,15 @@ Candidate minimum salary: {min_salary}
 Job Title: {job_title}
 Job Description: {job_description[:1500]}
 
+Scoring guide:
+8-10: Strong direct match
+5-7: Related role or transferable skills
+3-4: Adjacent / career-path opportunity worth trying
+1-2: Mostly unrelated but tiny overlap
+0: Completely unrelated field
+
 Respond with ONLY valid JSON, no markdown fences:
-{{"score": <0-10 integer>, "reason": "<one sentence>", "apply": <true if score>=6 else false>}}"""
+{{"score": <0-10 integer>, "reason": "<one sentence>", "apply": <true if score>=3 else false>}}"""
 
         for attempt in range(3):
             try:

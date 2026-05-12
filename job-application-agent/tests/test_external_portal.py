@@ -10,7 +10,7 @@ PROFILE = {
 
 
 def make_agent():
-    with patch("core.form_filler.ChatGoogleGenerativeAI"):
+    with patch("core.llm_client.build_llm", return_value=MagicMock()):
         from core.form_filler import UniversalFormFiller
         filler = UniversalFormFiller(PROFILE)
         filler.llm = MagicMock()

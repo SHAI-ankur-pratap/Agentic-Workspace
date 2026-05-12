@@ -19,14 +19,15 @@ Python, Playwright, PyTest, Selenium
 
 
 def make_tailor(mock_content, base_resume_path):
-    with patch("core.cv_tailor.ChatGoogleGenerativeAI") as MockLLM:
-        mock_response = MagicMock()
-        mock_response.content = mock_content
-        MockLLM.return_value.invoke.return_value = mock_response
+    mock_llm = MagicMock()
+    mock_response = MagicMock()
+    mock_response.content = mock_content
+    mock_llm.invoke.return_value = mock_response
+    with patch("core.llm_client.build_llm", return_value=mock_llm):
         from core.cv_tailor import CVTailor
         tailor = CVTailor(base_cv_path=str(base_resume_path))
-        tailor.llm = MockLLM.return_value
-        return tailor
+    tailor.llm = mock_llm
+    return tailor
 
 
 def test_rewrite_returns_tailored_content(tmp_path):
@@ -50,7 +51,7 @@ def test_generate_pdf_creates_file(tmp_path):
     resume_file = tmp_path / "resume.md"
     resume_file.write_text(SAMPLE_RESUME)
     output_pdf = str(tmp_path / "out.pdf")
-    with patch("core.cv_tailor.ChatGoogleGenerativeAI"):
+    with patch("core.llm_client.build_llm", return_value=MagicMock()):
         from core.cv_tailor import CVTailor
         tailor = CVTailor(base_cv_path=str(resume_file))
     asyncio.run(tailor.generate_pdf(SAMPLE_RESUME, output_pdf))

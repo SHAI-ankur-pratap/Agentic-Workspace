@@ -162,14 +162,15 @@ class LinkedInAgent(JobBrowserAgent):
         )
 
         # Step 1: Try JavaScript click in rapid bursts (catches SSR "Easy Apply" before React removes it)
+        # NOTE: "I'm interested" is NOT a job application — it only sends a signal
+        # to the recruiter and does NOT appear in LinkedIn's Applied jobs section.
+        # We only click actual apply buttons.
         JS_CLICK = """() => {
             const vis = b => b.getBoundingClientRect().width > 0;
-            const btns = Array.from(document.querySelectorAll('button')).filter(vis);
-            // Priority: Easy Apply > Apply > I'm interested (works with Unicode apostrophe)
+            const btns = Array.from(document.querySelectorAll('button, a[role="button"]')).filter(vis);
             const btn =
                 btns.find(b => b.textContent.trim().toLowerCase().includes('easy apply')) ||
-                btns.find(b => { const t = b.textContent.trim().toLowerCase(); return t === 'apply' || t.startsWith('apply '); }) ||
-                btns.find(b => b.textContent.trim().toLowerCase().includes('interested'));
+                btns.find(b => { const t = b.textContent.trim().toLowerCase(); return t === 'apply' || t.startsWith('apply '); });
             if (btn) { btn.click(); return btn.textContent.trim().slice(0, 40); }
             return null;
         }"""
@@ -212,15 +213,12 @@ class LinkedInAgent(JobBrowserAgent):
                     return True, None
                 except Exception:
                     pass
-                # No modal — check if "I'm interested" silently succeeded
-                try:
-                    page_text = await page.evaluate("() => document.body.innerText.toLowerCase()")
-                    if "expressed interest" in page_text or "you've expressed" in page_text:
-                        print(f"   ✅ 'I'm interested' registered (no modal needed)")
-                        return True, None  # _handle_modal will detect success text
-                except Exception:
-                    pass
-                print(f"   ⚠️ Clicked '{clicked_text}' but no modal/confirmation yet. Continuing...")
+                # No modal opened — Easy Apply button may have been a link or redirected
+                # Check for URL change indicating external portal
+                await page.wait_for_timeout(1000)
+                if "linkedin.com" not in page.url:
+                    return True, page
+                print(f"   ⚠️ Clicked '{clicked_text}' but no modal opened. Will check confirmation in handler.")
                 return True, None
 
             await asyncio.sleep(0.3)
@@ -232,12 +230,14 @@ class LinkedInAgent(JobBrowserAgent):
         """Step through the Easy Apply modal or I'm interested dialog. Returns outcome string."""
         await page.wait_for_timeout(1500)
 
-        # Check for "I'm interested" success — LinkedIn India silently registers interest
-        # with no modal; page shows "You've expressed interest in..." confirmation text
+        # Check for actual application confirmation text from LinkedIn
         try:
             page_text = await page.evaluate("() => document.body.innerText.toLowerCase()")
-            if "expressed interest" in page_text or "you've expressed" in page_text:
-                print("   ✅ 'I'm interested' registered — confirmed by page text!")
+            if any(kw in page_text for kw in [
+                "application submitted", "applied successfully",
+                "your application was sent", "done applying"
+            ]):
+                print("   ✅ Application confirmed by page text!")
                 return "applied"
         except Exception:
             pass
@@ -296,59 +296,66 @@ class LinkedInAgent(JobBrowserAgent):
             await filler.parse_and_fill(page, page.url)
             await page.wait_for_timeout(500)
 
-            # Check for Submit button first
-            submit_btn = page.locator(
-                'button:has-text("Submit application"), '
-                'button:has-text("Submit Application"), '
-                'button:has-text("Submit")'
-            )
-            if await submit_btn.count() > 0:
-                try:
-                    if await submit_btn.first.is_visible():
-                        print("   🚀 Clicking Submit application...")
-                        await submit_btn.first.click()
-                        await page.wait_for_timeout(3000)
-                        # Check for confirmation
-                        try:
-                            page_text = await page.evaluate(
-                                "() => document.body.innerText.toLowerCase()"
-                            )
-                            if any(kw in page_text for kw in [
-                                "application submitted", "applied successfully",
-                                "your application was sent", "done", "application sent"
-                            ]):
-                                print("   ✅ Confirmed: Application submitted!")
-                                return "applied"
-                        except Exception:
-                            pass
-                        print("   ✅ Submit clicked (no confirmation text found, marking applied).")
-                        return "applied"
-                except Exception as e:
-                    print(f"   ⚠️ Submit click error: {e}")
+            # Use JS to find and click Submit or Next — works with hashed CSS classes
+            SUBMIT_KEYWORDS = ['submit application', 'submit', 'send application', 'done']
+            NEXT_KEYWORDS   = ['next', 'review', 'continue', 'save and continue']
 
-            # Try Next / Review / Continue
-            next_selectors = [
-                'button:has-text("Next")',
-                'button:has-text("Review your application")',
-                'button:has-text("Review")',
-                'button:has-text("Continue to next step")',
-                'button:has-text("Continue")',
-            ]
-            clicked_next = False
-            for nsel in next_selectors:
-                try:
-                    nbtn = page.locator(nsel).first
-                    if await nbtn.count() > 0 and await nbtn.is_visible():
-                        print(f"   ➡️ Clicking '{nsel}'...")
-                        await nbtn.click()
-                        clicked_next = True
-                        break
-                except Exception:
-                    continue
+            action_result = await page.evaluate(f"""() => {{
+                const vis = b => b.getBoundingClientRect().width > 0;
+                const btns = Array.from(document.querySelectorAll('[role="dialog"] button, [data-test-modal] button, .artdeco-modal button, button'))
+                    .filter(vis);
 
-            if not clicked_next:
+                // Prefer Submit over Next
+                const submitKw = {SUBMIT_KEYWORDS};
+                const nextKw   = {NEXT_KEYWORDS};
+
+                const submitBtn = btns.find(b => submitKw.some(k => b.textContent.trim().toLowerCase().includes(k)));
+                if (submitBtn) {{ submitBtn.click(); return 'submitted:' + submitBtn.textContent.trim(); }}
+
+                const nextBtn = btns.find(b => nextKw.some(k => b.textContent.trim().toLowerCase() === k));
+                if (nextBtn) {{ nextBtn.click(); return 'next:' + nextBtn.textContent.trim(); }}
+
+                return null;
+            }}""")
+
+            if not action_result:
                 print("  ⚠️ No Next/Submit button found in modal.")
                 return "failed"
+
+            action, btn_text = action_result.split(":", 1) if ":" in action_result else (action_result, "")
+            print(f"   {'🚀' if action == 'submitted' else '➡️'} Clicked: '{btn_text.strip()}'")
+
+            if action == "submitted":
+                # Wait up to 10 seconds for LinkedIn's confirmation state
+                CONFIRM_KWS = [
+                    "application submitted", "applied successfully",
+                    "your application was sent", "application was sent",
+                    "done applying", "successfully applied",
+                ]
+                for wait_round in range(5):
+                    await page.wait_for_timeout(2000)
+                    try:
+                        page_text = await page.evaluate("() => document.body.innerText.toLowerCase()")
+                        if any(kw in page_text for kw in CONFIRM_KWS):
+                            print("   ✅ CONFIRMED: Application submitted!")
+                            # Dismiss any post-apply modal
+                            await page.evaluate("""() => {
+                                const btn = Array.from(document.querySelectorAll('button'))
+                                    .find(b => ['done', 'dismiss', 'close', 'not now'].some(
+                                        k => b.textContent.trim().toLowerCase() === k
+                                    ));
+                                if (btn) btn.click();
+                            }""")
+                            return "applied"
+                        # Also check if modal closed (means it submitted)
+                        modal_gone = not await page.query_selector('[role="dialog"], [data-test-modal]')
+                        if modal_gone and wait_round >= 1:
+                            print("   ✅ Modal closed — application submitted.")
+                            return "applied"
+                    except Exception:
+                        pass
+                print("   ✅ Submit clicked (confirmation wait exhausted — marking applied).")
+                return "applied"
 
         print("  ⚠️ Reached max steps without submitting.")
         return "failed"
@@ -454,11 +461,12 @@ class LinkedInAgent(JobBrowserAgent):
             await job_page.close()
             return "skipped_low_score"
 
-        # Tailor CV
+        # Use base resume directly (no per-job LLM rewrite — faster and uses fewer API calls)
         tailor = CVTailor()
-        tailored_md = tailor.rewrite_cv(jd or job_title)
+        with open(tailor.base_cv_path, "r") as f:
+            base_md = f.read()
         cv_path = f"tailored_linkedin_cv_{job_id[:8]}.pdf"
-        await tailor.generate_pdf(tailored_md, cv_path)
+        await tailor.generate_pdf(base_md, cv_path)
 
         outcome = "failed"
         ext_page = None

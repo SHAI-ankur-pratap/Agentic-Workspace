@@ -94,7 +94,8 @@ class NaukriAgent(JobBrowserAgent):
             await page.wait_for_timeout(3000)
             jd = await self._extract_jd(page)
             tailor = CVTailor()
-            tailored_md = tailor.rewrite_cv(jd or job_url)
+            with open(tailor.base_cv_path, "r") as _f:
+                tailored_md = _f.read()
             cv_path = "tailored_cv_single_naukri.pdf"
             await tailor.generate_pdf(tailored_md, cv_path)
             filler = UniversalFormFiller(profile)
@@ -201,7 +202,8 @@ class NaukriAgent(JobBrowserAgent):
                             continue
 
                         tailor = CVTailor()
-                        tailored_md = tailor.rewrite_cv(jd or title)
+                        with open(tailor.base_cv_path, "r") as _f:
+                            tailored_md = _f.read()
                         cv_path = f"tailored_naukri_cv_{job_id[:8]}.pdf"
                         await tailor.generate_pdf(tailored_md, cv_path)
 
