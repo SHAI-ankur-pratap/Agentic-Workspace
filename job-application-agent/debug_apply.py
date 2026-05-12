@@ -124,7 +124,15 @@ async def main():
 
         job_page = await context.new_page()
         await job_page.goto(first_job['href'], wait_until="domcontentloaded", timeout=30000)
-        await job_page.wait_for_timeout(3000)
+        # Wait for any apply button (catches it before React re-hydrates)
+        APPLY_BTN = ('button:has-text("Easy Apply"), button.apply-button, '
+                     'button.jobs-apply-button, button:has-text("Apply"), '
+                     "button:has-text(\"I'm interested\")")
+        try:
+            await job_page.wait_for_selector(APPLY_BTN, timeout=8000)
+            print("  ✅ Apply button appeared!")
+        except Exception:
+            print("  ⚠️ No apply button appeared within 8s")
         await snap(job_page, "05_job_detail")
 
         # --- CHECK JD ---

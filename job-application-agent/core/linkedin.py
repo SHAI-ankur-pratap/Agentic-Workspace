@@ -156,6 +156,7 @@ class LinkedInAgent(JobBrowserAgent):
             '.jobs-s-apply button',
             '.top-card-layout__cta button',                           # public page CTA
             'button:has-text("Apply")',                               # fallback
+            'button:has-text("I\'m interested")',                     # LinkedIn India personalised CTA
         ]
         for sel in selectors:
             try:
@@ -191,13 +192,15 @@ class LinkedInAgent(JobBrowserAgent):
                 except Exception:
                     pass  # No new tab — fall through to modal/same-page check
 
-                # Check for Easy Apply modal on current page
+                # Check for Easy Apply modal or "I'm interested" confirmation
+                MODAL_SEL = (
+                    '[data-test-modal], [role="dialog"], '
+                    '.jobs-easy-apply-modal, .artdeco-modal, '
+                    '.jobs-apply-button__container'
+                )
                 try:
-                    await page.wait_for_selector(
-                        '[data-test-modal], [role="dialog"], .jobs-easy-apply-modal',
-                        timeout=5000,
-                    )
-                    print("   ✅ Easy Apply modal opened!")
+                    await page.wait_for_selector(MODAL_SEL, timeout=5000)
+                    print("   ✅ Apply modal / dialog opened!")
                     return True, None
                 except Exception:
                     pass
@@ -218,9 +221,26 @@ class LinkedInAgent(JobBrowserAgent):
         return False, None
 
     async def _handle_easy_apply_modal(self, page, profile, resume_pdf_path, filler) -> str:
-        """Step through the Easy Apply modal, filling each screen. Returns outcome string."""
-        resume_uploaded = False
+        """Step through the Easy Apply modal or I'm interested dialog. Returns outcome string."""
+        await page.wait_for_timeout(1000)
 
+        # Handle "I'm interested" confirmation — just click "I'm interested" or "Done"
+        for interested_sel in [
+            'button:has-text("I\'m interested")',
+            'button:has-text("Done")',
+            'button:has-text("Confirm")',
+        ]:
+            try:
+                btn = page.locator(interested_sel).first
+                if await btn.count() > 0 and await btn.is_visible():
+                    print(f"   ✅ Confirming 'I'm interested'...")
+                    await btn.click()
+                    await page.wait_for_timeout(2000)
+                    return "applied"
+            except Exception:
+                pass
+
+        resume_uploaded = False
         for step in range(10):
             await page.wait_for_timeout(2000)
             print(f"   📋 Modal step {step + 1}...")
@@ -385,7 +405,6 @@ class LinkedInAgent(JobBrowserAgent):
     async def _process_single_job(self, context, job_url: str, job_title: str,
                                    role: str, profile: dict, db, stats: dict) -> str:
         """Open a job page directly, score, tailor CV, apply. Returns outcome string."""
-        # Open job in a dedicated tab so the search page stays intact
         job_page = await context.new_page()
         try:
             await job_page.goto(job_url, wait_until="domcontentloaded", timeout=30000)
@@ -394,7 +413,22 @@ class LinkedInAgent(JobBrowserAgent):
             await job_page.close()
             return "failed"
 
-        await job_page.wait_for_timeout(2000)
+        # Wait for an apply-type button to appear (catches SSR before React hydrates)
+        APPLY_BTN_SELECTOR = (
+            'button:has-text("Easy Apply"), '
+            'button.apply-button, '
+            'button.jobs-apply-button, '
+            'button:has-text("Apply"), '
+            'button:has-text("I\'m interested")'
+        )
+        try:
+            await job_page.wait_for_selector(APPLY_BTN_SELECTOR, timeout=8000)
+        except Exception:
+            print(f"  ⚠️ No apply button appeared within 8s")
+
+        # Scroll down to load full JD (LinkedIn lazy-loads description)
+        await job_page.evaluate("window.scrollBy(0, 400)")
+        await job_page.wait_for_timeout(1500)
 
         jd = await self._extract_jd(job_page)
         company = await self._extract_company(job_page)
