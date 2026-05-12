@@ -41,9 +41,10 @@ class LinkedInAgent(JobBrowserAgent):
             os.remove(self.state_file)
 
         print(f"🤖 Logging into LinkedIn as {self.email}...")
-        await page.goto(self.login_url)
-        await page.fill("input#username", self.email)
-        await page.fill("input#password", self.password)
+        await page.goto(self.login_url, wait_until="domcontentloaded", timeout=60000)
+        await page.wait_for_timeout(2000)
+        await page.fill("input#username", self.email, timeout=15000)
+        await page.fill("input#password", self.password, timeout=15000)
         await page.click("button[type='submit']")
         print("⏳ Waiting 90s for 2FA approval on your phone...")
         await page.wait_for_timeout(90000)
