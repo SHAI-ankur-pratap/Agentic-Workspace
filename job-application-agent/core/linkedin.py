@@ -96,50 +96,139 @@ class LinkedInAgent(JobBrowserAgent):
                 continue
         return "UnknownCompany"
 
-    async def _handle_easy_apply_modal(self, page, profile, resume_pdf_path, filler) -> str:
-        for step in range(8):
-            await page.wait_for_timeout(2000)
-
+    async def _click_easy_apply(self, page) -> bool:
+        """Click the Easy Apply button using Playwright's native click (not JS). Returns True if modal opened."""
+        # Multiple selectors LinkedIn uses for the Easy Apply button
+        selectors = [
+            'button.jobs-apply-button',
+            'button[data-control-name="jobdetails_topcard_inapply"]',
+            '.jobs-s-apply button',
+            'button:has-text("Easy Apply")',
+            'button:has-text("Apply")',
+        ]
+        for sel in selectors:
             try:
-                file_input = await page.query_selector('input[type="file"]')
-                if file_input and os.path.exists(resume_pdf_path):
-                    await file_input.set_input_files(resume_pdf_path)
-                    print(f"   📎 Uploaded resume at step {step + 1}")
-                    await page.wait_for_timeout(1000)
+                btn = page.locator(sel).first
+                if await btn.count() > 0 and await btn.is_visible():
+                    print(f"   🖱️ Clicking Apply button ({sel})...")
+                    await btn.click()
+                    # Wait for modal to appear
+                    try:
+                        await page.wait_for_selector(
+                            '[data-test-modal], [role="dialog"], .jobs-easy-apply-modal',
+                            timeout=5000
+                        )
+                        print("   ✅ Easy Apply modal opened!")
+                        return True
+                    except Exception:
+                        # Button clicked but modal didn't open — might be external redirect
+                        await page.wait_for_timeout(2000)
+                        if "linkedin.com" not in page.url:
+                            return True  # External redirect
+                        return False
             except Exception:
-                pass
+                continue
+        print("  ⚠️ Easy Apply button not found on this job.")
+        return False
 
+    async def _handle_easy_apply_modal(self, page, profile, resume_pdf_path, filler) -> str:
+        """Step through the Easy Apply modal, filling each screen. Returns outcome string."""
+        resume_uploaded = False
+
+        for step in range(10):
+            await page.wait_for_timeout(2000)
+            print(f"   📋 Modal step {step + 1}...")
+
+            # Verify modal is still open
+            modal = await page.query_selector(
+                '[data-test-modal], [role="dialog"], .jobs-easy-apply-modal'
+            )
+            if not modal:
+                # Modal closed — check for success confirmation
+                try:
+                    page_text = await page.evaluate("() => document.body.innerText.toLowerCase()")
+                    if any(kw in page_text for kw in [
+                        "application submitted", "applied successfully", "your application was sent",
+                        "done", "application sent"
+                    ]):
+                        print("   ✅ Application confirmed submitted!")
+                        return "applied"
+                except Exception:
+                    pass
+                print("  ⚠️ Modal closed without confirmation.")
+                return "failed"
+
+            # Upload resume (only once, on the step that has a file input)
+            if not resume_uploaded:
+                try:
+                    file_input = await page.query_selector('input[type="file"]')
+                    if file_input and os.path.exists(resume_pdf_path):
+                        await file_input.set_input_files(resume_pdf_path)
+                        resume_uploaded = True
+                        print(f"   📎 Resume uploaded at step {step + 1}")
+                        await page.wait_for_timeout(1500)
+                except Exception as e:
+                    print(f"   ⚠️ Resume upload error: {e}")
+
+            # Fill any visible form fields
             await filler.parse_and_fill(page, page.url)
+            await page.wait_for_timeout(500)
 
+            # Check for Submit button first
             submit_btn = page.locator(
-                'button:has-text("Submit application"), button:has-text("Submit Application")'
+                'button:has-text("Submit application"), '
+                'button:has-text("Submit Application"), '
+                'button:has-text("Submit")'
             )
             if await submit_btn.count() > 0:
                 try:
                     if await submit_btn.first.is_visible():
+                        print("   🚀 Clicking Submit application...")
                         await submit_btn.first.click()
-                        await page.wait_for_timeout(2000)
-                        print("✅ Easy Apply submitted!")
+                        await page.wait_for_timeout(3000)
+                        # Check for confirmation
+                        try:
+                            page_text = await page.evaluate(
+                                "() => document.body.innerText.toLowerCase()"
+                            )
+                            if any(kw in page_text for kw in [
+                                "application submitted", "applied successfully",
+                                "your application was sent", "done", "application sent"
+                            ]):
+                                print("   ✅ Confirmed: Application submitted!")
+                                return "applied"
+                        except Exception:
+                            pass
+                        print("   ✅ Submit clicked (no confirmation text found, marking applied).")
                         return "applied"
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"   ⚠️ Submit click error: {e}")
 
-            next_btn = page.locator(
-                'button:has-text("Next"), button:has-text("Review"), button:has-text("Continue to next step")'
-            )
-            if await next_btn.count() > 0:
+            # Try Next / Review / Continue
+            next_selectors = [
+                'button:has-text("Next")',
+                'button:has-text("Review your application")',
+                'button:has-text("Review")',
+                'button:has-text("Continue to next step")',
+                'button:has-text("Continue")',
+            ]
+            clicked_next = False
+            for nsel in next_selectors:
                 try:
-                    if await next_btn.first.is_visible():
-                        await next_btn.first.click()
-                        continue
+                    nbtn = page.locator(nsel).first
+                    if await nbtn.count() > 0 and await nbtn.is_visible():
+                        print(f"   ➡️ Clicking '{nsel}'...")
+                        await nbtn.click()
+                        clicked_next = True
+                        break
                 except Exception:
-                    pass
+                    continue
 
-            modal = await page.query_selector('[data-test-modal]')
-            if not modal:
-                return "applied"
-            break
+            if not clicked_next:
+                print("  ⚠️ No Next/Submit button found in modal.")
+                return "failed"
 
+        print("  ⚠️ Reached max steps without submitting.")
         return "failed"
 
     async def apply_to_job(self, job_url: str, profile: dict, generator=None):
@@ -159,15 +248,12 @@ class LinkedInAgent(JobBrowserAgent):
             filler = UniversalFormFiller(profile)
 
             try:
-                await page.evaluate("""() => {
-                    const btns = Array.from(document.querySelectorAll('button'));
-                    const btn = btns.find(b =>
-                        b.textContent.includes('Easy Apply') || b.className.includes('jobs-apply-button')
-                    );
-                    if (btn) btn.click();
-                }""")
-                await page.wait_for_timeout(3000)
-                outcome = await self._handle_easy_apply_modal(page, profile, cv_path, filler)
+                modal_opened = await self._click_easy_apply(page)
+                if modal_opened:
+                    outcome = await self._handle_easy_apply_modal(page, profile, cv_path, filler)
+                else:
+                    print("⚠️ Easy Apply button not found or modal did not open.")
+                    outcome = "failed"
             except Exception as e:
                 print(f"⚠️ Apply error: {e}")
                 outcome = "failed"
@@ -278,21 +364,18 @@ class LinkedInAgent(JobBrowserAgent):
 
                         outcome = "failed"
                         try:
-                            await page.evaluate("""() => {
-                                const btns = Array.from(document.querySelectorAll('button'));
-                                const btn = btns.find(b =>
-                                    b.textContent.includes('Easy Apply') ||
-                                    b.className.includes('jobs-apply-button')
-                                );
-                                if (btn) btn.click();
-                            }""")
-                            await page.wait_for_timeout(3000)
+                            modal_opened = await self._click_easy_apply(page)
 
-                            if "linkedin.com" not in page.url:
+                            if not modal_opened:
+                                print(f"  ⚠️ Could not open Easy Apply for: {title[:40]}")
+                                outcome = "failed"
+                            elif "linkedin.com" not in page.url:
+                                # Redirected to external company site
                                 filler = UniversalFormFiller(profile)
                                 portal = ExternalPortalAgent(profile, filler)
                                 outcome = await portal.apply(page, page.url, cv_path)
                             else:
+                                # Easy Apply modal is open on LinkedIn
                                 filler = UniversalFormFiller(profile)
                                 outcome = await self._handle_easy_apply_modal(
                                     page, profile, cv_path, filler
