@@ -104,6 +104,7 @@ class NaukriAgent(JobBrowserAgent):
             if os.path.exists(cv_path):
                 os.remove(cv_path)
             await browser.close()
+            return "applied" if filled else "failed"
 
     async def autonomous_search_and_apply(self, profile: dict, generator=None):
         stats = {"applied": 0, "skipped": 0, "failed": 0, "manual": 0}

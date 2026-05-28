@@ -548,6 +548,7 @@ class LinkedInAgent(JobBrowserAgent):
 
             await browser.close()
             print(f"Outcome: {outcome}")
+            return outcome
 
     async def autonomous_search_and_apply(self, profile: dict, generator=None):
         stats = {"applied": 0, "skipped": 0, "failed": 0, "manual": 0}

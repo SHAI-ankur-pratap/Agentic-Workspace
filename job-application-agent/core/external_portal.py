@@ -101,7 +101,178 @@ class ExternalPortalAgent:
                 return portal
         return "generic"
 
+    async def _handle_cloudflare(self, page, timeout_sec=60) -> bool:
+        for i in range(timeout_sec // 2):
+            try:
+                title = await page.title()
+                content = await page.content()
+                is_cf = (
+                    "just a moment" in title.lower() or 
+                    "verify you are human" in content.lower() or 
+                    "security verification" in content.lower() or
+                    ("cloudflare" in content.lower() and "verify" in content.lower())
+                )
+                if is_cf:
+                    if i % 5 == 0:
+                        print(f"🚨 [Cloudflare Wall Detected] Please solve the challenge in the visible browser! (Waiting... {timeout_sec - i*2}s remaining)")
+                    await page.wait_for_timeout(2000)
+                else:
+                    if i > 0:
+                        print("✅ [Cloudflare Bypass] Challenge solved or bypassed! Continuing...")
+                    return True
+            except Exception as e:
+                # Page might be navigating or reloading
+                await page.wait_for_timeout(2000)
+        return False
+
+    async def resolve_redirects(self, page) -> bool:
+        import urllib.parse
+        initial_url = page.url
+        initial_domain = urllib.parse.urlparse(initial_url).netloc
+        
+        print(f"🔄 [External Portal] Resolving potential redirects for {initial_url}...")
+        
+        # Handle Cloudflare first
+        await self._handle_cloudflare(page)
+        
+        # 1. Dismiss cookies first
+        await self._dismiss_cookies(page)
+
+        # Wait for any apply button/link to appear
+        try:
+            print("   ⏳ [External Portal] Waiting for Apply button to appear...")
+            await page.wait_for_selector(
+                'a:has-text("Apply"), button:has-text("Apply"), a:has-text("apply"), button:has-text("apply"), a:has-text("position"), button:has-text("position")',
+                timeout=5000
+            )
+            print("   ✅ [External Portal] Apply button detected.")
+        except Exception:
+            print("   ⚠️ [External Portal] Apply button wait timed out.")
+        
+        # 2. Look for any visible links/buttons with apply text
+        # Let's search all <a> tags first
+        links = await page.query_selector_all('a')
+        best_href = None
+        
+        texts_to_check = [
+            "apply for this position",
+            "apply to this job",
+            "apply on company site",
+            "apply on company website",
+            "apply to this remote job",
+            "apply now",
+            "apply"
+        ]
+        
+        for text_pat in texts_to_check:
+            for link in links:
+                try:
+                    if not await link.is_visible():
+                        continue
+                    text = (await link.inner_text()).lower().strip()
+                    if text_pat in text:
+                        href = await link.get_attribute("href")
+                        if href:
+                            href_lower = href.lower().strip()
+                            if href_lower.startswith("http") or href_lower.startswith("//"):
+                                # Check if it goes to a different domain
+                                parsed_href = urllib.parse.urlparse(href)
+                                if parsed_href.netloc and parsed_href.netloc != initial_domain:
+                                    best_href = href
+                                    break
+                except Exception:
+                    continue
+            if best_href:
+                break
+                
+        if best_href:
+            print(f"   🔗 [External Portal] Found external apply URL: {best_href}")
+            await page.goto(best_href, wait_until="domcontentloaded", timeout=60000)
+            await page.wait_for_timeout(3000)
+            await self._handle_cloudflare(page)
+            return True
+            
+        # 3. If no direct link with external href was found, try clicking the apply buttons/links to see if it redirects or opens modal
+        # We look for a button or link with apply text
+        for text_pat in texts_to_check:
+            selectors = [
+                f'a:has-text("{text_pat}")',
+                f'button:has-text("{text_pat}")',
+                f'a:has-text("{text_pat.capitalize()}")',
+                f'button:has-text("{text_pat.capitalize()}")',
+                f'a:has-text("{text_pat.title()}")',
+                f'button:has-text("{text_pat.title()}")',
+            ]
+            for sel in selectors:
+                try:
+                    loc = page.locator(sel)
+                    count = await loc.count()
+                    if count > 0:
+                        el = loc.first
+                        if await el.is_visible() and await el.is_enabled():
+                            # Try clicking and wait for navigation or new page/popup
+                            print(f"   🖱️ [External Portal] Clicking element '{text_pat}' using selector '{sel}'")
+                            
+                            # Set up popup listener just in case it opens a new tab
+                            popup_promise = page.context.wait_for_event("page", timeout=5000)
+                            
+                            # Click the button
+                            await el.click()
+                            
+                            try:
+                                # Wait for new page (tab) if opened
+                                new_page = await popup_promise
+                                await new_page.wait_for_load_state("domcontentloaded")
+                                print(f"   🆕 [External Portal] New tab opened: {new_page.url}")
+                                target_url = new_page.url
+                                await new_page.close()
+                                await page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
+                                await page.wait_for_timeout(3000)
+                                await self._handle_cloudflare(page)
+                                return True
+                            except Exception as popup_err:
+                                # No new tab, check if page navigated or opened a modal
+                                pass
+                                
+                            # Wait to see if the URL changed
+                            await page.wait_for_timeout(2000)
+                            await self._handle_cloudflare(page)
+                            if urllib.parse.urlparse(page.url).netloc != initial_domain:
+                                print(f"   🚀 [External Portal] Navigated to: {page.url}")
+                                return True
+                                
+                            # Check if a modal or new link became visible (like on Remotive)
+                            # We re-query <a> tags
+                            new_links = await page.query_selector_all('a')
+                            for nl in new_links:
+                                try:
+                                    if not await nl.is_visible():
+                                        continue
+                                    n_text = (await nl.inner_text()).lower().strip()
+                                    if any(tp in n_text for tp in texts_to_check):
+                                        n_href = await nl.get_attribute("href")
+                                        if n_href:
+                                            n_href_lower = n_href.lower().strip()
+                                            if n_href_lower.startswith("http") or n_href_lower.startswith("//"):
+                                                parsed_nhref = urllib.parse.urlparse(n_href)
+                                                if parsed_nhref.netloc and parsed_nhref.netloc != initial_domain:
+                                                    print(f"   🔗 [External Portal] Found external apply URL in modal/change: {n_href}")
+                                                    await page.goto(n_href, wait_until="domcontentloaded", timeout=60000)
+                                                    await page.wait_for_timeout(3000)
+                                                    await self._handle_cloudflare(page)
+                                                    return True
+                                except Exception as link_err:
+                                    continue
+                except Exception as sel_err:
+                    print(f"   ⚠️ [resolve_redirects] Error checking selector '{sel}': {sel_err}")
+                    continue
+                    
+        return False
+
     async def apply(self, page, job_url: str, resume_pdf_path: str) -> str:
+        # Resolve potential aggregator redirects first
+        await self.resolve_redirects(page)
+
         portal = self.detect_portal(page.url)
         print(f"🌐 [External Portal] Portal: {portal} — {page.url[:80]}")
 
