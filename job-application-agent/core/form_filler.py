@@ -1,102 +1,137 @@
-import asyncio
 import json
 import os
+from dotenv import load_dotenv
+from langchain_core.messages import HumanMessage
+from core.llm_helper import extract_text
+from core.llm_client import build_llm
+
+load_dotenv()
+
+ACCOUNT_WALL_PHRASES = ["create account", "sign in to apply", "register to apply", "sign up to apply"]
+WORKDAY_HOSTS = ["myworkdayjobs.com", "wd3.myworkdaysite.com", "wd1.myworkdaysite.com"]
+
 
 class UniversalFormFiller:
-    def __init__(self, profile):
+    def __init__(self, profile: dict):
         self.profile = profile
         self.manual_review_file = "manual_review.txt"
+        self.llm = build_llm(temperature=0)
 
-    async def parse_and_fill(self, page, job_url):
-        print("🤖 [Form Filler] Scanning page for complex questionnaires or external redirections...")
-        
-        # Check for account creation walls (e.g. Workday login)
-        page_text = await page.evaluate("() => document.body.innerText.toLowerCase()")
-        if ("create account" in page_text or "sign in to apply" in page_text) and ("workday" in page.url.lower() or "myworkdayjobs" in page.url.lower()):
-            print(f"⚠️ [Form Filler] Detected Workday account creation wall! Gracefully skipping.")
-            self.log_manual_review(job_url, "Account Creation Required (Workday)")
+    async def parse_and_fill(self, page, job_url: str) -> bool:
+        print("🤖 [Form Filler] Scanning page for form fields...")
+
+        try:
+            page_text = await page.evaluate("() => document.body.innerText.toLowerCase()")
+        except Exception:
+            page_text = ""
+
+        url_lower = getattr(page, "url", job_url).lower()
+        is_workday = any(h in url_lower for h in WORKDAY_HOSTS)
+        has_account_wall = any(phrase in page_text for phrase in ACCOUNT_WALL_PHRASES)
+
+        if is_workday and has_account_wall:
+            print("⛔ [Form Filler] Workday account wall detected. Skipping.")
+            self._log_manual_review(job_url, "Account Creation Required (Workday)")
             return False
-            
-        # Extract inputs
+
         inputs = await page.evaluate("""() => {
-            const fields = Array.from(document.querySelectorAll('input:not([type="hidden"]), select, textarea'));
+            const fields = Array.from(document.querySelectorAll(
+                'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="file"]), select, textarea'
+            ));
             return fields.map(f => {
                 let label = '';
                 if (f.id) {
                     const l = document.querySelector(`label[for="${f.id}"]`);
-                    if (l) label = l.innerText;
+                    if (l) label = l.innerText.trim();
                 }
                 if (!label && f.placeholder) label = f.placeholder;
                 if (!label && f.name) label = f.name;
-                return { id: f.id, name: f.name, type: f.type, label: label, value: f.value };
+                let options = [];
+                if (f.tagName === 'SELECT') {
+                    options = Array.from(f.options).map(o => o.text.trim()).filter(Boolean);
+                }
+                return { id: f.id, name: f.name, type: f.type || f.tagName.toLowerCase(), label, options };
             }).filter(f => f.label || f.name);
         }""")
-        
+
         if not inputs:
-            print("⏭️ [Form Filler] No complex form fields detected. Proceeding...")
+            print("⏭️ [Form Filler] No form fields found.")
             return True
 
-        print(f"🧠 [Form Filler] Found {len(inputs)} fields. Mapping to profile data...")
-        
-        # Here we would normally call the LLM to map `inputs` to `self.profile`.
-        # Since we don't have an API key, we mock a basic mapping.
-        mapped_data = self._mock_llm_mapping(inputs)
-        
-        if not mapped_data:
-            print("⏭️ [Form Filler] No relevant fields matched. Passing.")
-            return True
-            
-        # Fill the form
-        for field_key, item in mapped_data.items():
-            field = item["field"]
-            value = item["value"]
+        print(f"🧠 [Form Filler] {len(inputs)} fields detected. Mapping via Gemini...")
+
+        pi = self.profile.get("personal_info", {})
+        prefs = self.profile.get("preferences", {})
+        qa_bank = self.profile.get("qa_bank", [])
+        qa_examples = "\n".join(f"Q: {q['question']} → A: {q['answer']}" for q in qa_bank)
+
+        prompt = f"""Map these HTML form fields to the candidate profile. Return ONLY valid JSON, no markdown.
+
+CANDIDATE:
+Name: {pi.get('first_name', '')} {pi.get('last_name', '')}
+Email: {pi.get('email', '')}
+Phone: {pi.get('phone', '')}
+Location: {pi.get('location', '')}
+Current Salary: {prefs.get('current_salary', '')}
+Expected Salary: {prefs.get('minimum_salary', '')}
+Notice Period: 30 days
+
+KNOWN Q&A:
+{qa_examples}
+
+FORM FIELDS:
+{json.dumps(inputs, indent=2)}
+
+Return a flat JSON object mapping field name/id to fill value.
+For fields you cannot confidently answer, set value to "__SKIP__".
+ONLY the JSON object, nothing else."""
+
+        mapping = {}
+        for attempt in range(3):
             try:
-                selector = f"*[name='{field['name']}']" if field['name'] else f"#{field['id']}"
-                if field['type'] in ['text', 'email', 'tel', 'number', 'textarea']:
+                response = self.llm.invoke([HumanMessage(content=prompt)])
+                text = extract_text(response.content).strip()
+                if text.startswith("```"):
+                    text = text.split("```")[1]
+                    if text.startswith("json"):
+                        text = text[4:]
+                mapping = json.loads(text.strip())
+                break
+            except Exception as e:
+                if attempt == 2:
+                    print(f"⚠️ [Form Filler] LLM failed: {e}. Skipping fill.")
+                    return True
+
+        for field_key, value in mapping.items():
+            if value == "__SKIP__":
+                self._log_manual_review(job_url, f"Low-confidence field: {field_key}")
+                continue
+            field_info = next(
+                (f for f in inputs if f["name"] == field_key or f["id"] == field_key), None
+            )
+            if not field_info:
+                continue
+            selector = f"[name='{field_key}']" if field_key else f"#{field_info['id']}"
+            try:
+                ftype = field_info["type"]
+                if ftype in ("text", "email", "tel", "number", "textarea", "search", "url"):
                     await page.fill(selector, str(value), timeout=2000)
-                    print(f"   -> Filled '{field['label']}': {value}")
-                elif field['type'] == 'select-one':
-                    # We might need to select by value or label, trying label first
+                elif ftype in ("select-one", "select"):
                     try:
                         await page.select_option(selector, label=str(value), timeout=2000)
-                    except:
+                    except Exception:
                         await page.select_option(selector, value=str(value), timeout=2000)
-                    print(f"   -> Selected '{field['label']}': {value}")
+                elif ftype == "radio":
+                    await page.check(f"[name='{field_key}'][value='{value}']", timeout=2000)
+                elif ftype == "checkbox":
+                    if str(value).lower() in ("yes", "true", "1"):
+                        await page.check(selector, timeout=2000)
+                print(f"   ✅ '{field_info['label']}' → {value}")
             except Exception as e:
-                print(f"   ⚠️ Could not fill field '{field['label']}': {e}")
-                
-        # Try to click Next/Submit on the questionnaire
-        try:
-            await page.evaluate("""() => {
-                const buttons = Array.from(document.querySelectorAll('button, input[type="submit"]'));
-                const nextBtn = buttons.find(b => b.textContent.toLowerCase().includes('next') || b.textContent.toLowerCase().includes('submit') || b.value.toLowerCase().includes('submit'));
-                if (nextBtn) {
-                    nextBtn.style.border = '5px solid blue'; // Highlight it
-                    nextBtn.click();
-                }
-            }""")
-            print("✅ [Form Filler] Clicked Next/Submit on complex form!")
-        except Exception:
-            pass
-            
+                print(f"   ⚠️ Could not fill '{field_key}': {e}")
+
         return True
 
-    def _mock_llm_mapping(self, inputs):
-        """Mock LLM response parsing fields to profile"""
-        mapping = {}
-        for f in inputs:
-            label = f['label'].lower()
-            key = f['name'] or f['id']
-            if 'salary' in label or 'ctc' in label:
-                mapping[key] = {"field": f, "value": "35 LPA"}
-            elif 'notice' in label or 'joining' in label:
-                mapping[key] = {"field": f, "value": "30 Days"}
-            elif 'experience' in label or 'years' in label:
-                mapping[key] = {"field": f, "value": "8"}
-            elif 'visa' in label or 'sponsorship' in label:
-                mapping[key] = {"field": f, "value": "No"}
-        return mapping
-        
-    def log_manual_review(self, url, reason):
+    def _log_manual_review(self, url: str, reason: str):
         with open(self.manual_review_file, "a") as f:
             f.write(f"[{reason}] {url}\n")

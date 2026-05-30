@@ -13,6 +13,5 @@ applied_jobs.json
 __pycache__/
 *.pyc
 
-# Debug scripts
-debug_*.py
-test_*.py
+# Scratch test scripts (root-level only, not tests/ dir)
+/test_*.py

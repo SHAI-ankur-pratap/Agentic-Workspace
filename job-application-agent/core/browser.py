@@ -1,6 +1,28 @@
 import asyncio
 import os
-from playwright.async_api import async_playwright
+import json
+
+def get_combined_storage_state(state_files=["linkedin_session.json", "naukri_session.json"], output_file="combined_session.json"):
+    combined = {"cookies": [], "origins": []}
+    for sf in state_files:
+        if os.path.exists(sf):
+            try:
+                with open(sf, 'r') as f:
+                    data = json.load(f)
+                    combined["cookies"].extend(data.get("cookies", []))
+                    combined["origins"].extend(data.get("origins", []))
+            except Exception as e:
+                print(f"⚠️ Error reading state file {sf}: {e}")
+                
+    if combined["cookies"] or combined["origins"]:
+        try:
+            with open(output_file, 'w') as f:
+                json.dump(combined, f, indent=2)
+            return output_file
+        except Exception as e:
+            print(f"⚠️ Error writing combined state file: {e}")
+            
+    return None
 
 class JobBrowserAgent:
     def __init__(self, headless=False, state_file="session_state.json"):
@@ -25,7 +47,11 @@ class JobBrowserAgent:
         return await p.chromium.launch(headless=self.headless, args=args)
 
     async def get_context(self, browser):
-        if os.path.exists(self.state_file):
+        combined = get_combined_storage_state()
+        if combined and os.path.exists(combined):
+            print(f"🔓 Loading combined saved session from {combined}")
+            return await browser.new_context(storage_state=combined)
+        elif os.path.exists(self.state_file):
             print(f"🔓 Loading saved session from {self.state_file}")
             return await browser.new_context(storage_state=self.state_file)
         return await browser.new_context()
@@ -45,3 +71,4 @@ class JobBrowserAgent:
                 await browser.close()
         except Exception as e:
             print(f"❌ Browser error: {e}")
+
