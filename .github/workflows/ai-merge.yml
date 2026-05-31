@@ -1,0 +1,110 @@
+name: AI Auto-Merge (Claude Code Bot)
+
+on:
+  workflow_run:
+    workflows: ["AI Code Review (Claude Code)"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number to merge"
+        required: true
+        type: string
+
+jobs:
+  claude-merge:
+    name: "Claude Code — Check Approval + Merge"
+    if: |
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: write
+
+    steps:
+      - name: Find PR
+        id: find_pr
+        env:
+          GH_TOKEN: ${{ secrets.BOT_GITHUB_TOKEN }}
+        run: |
+          REPO="${{ github.repository }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            PR_NUM="${{ github.event.inputs.pr_number }}"
+            echo "Manual: PR #$PR_NUM"
+            echo "pr_num=$PR_NUM" >> $GITHUB_OUTPUT
+            echo "pr_found=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          HEAD_SHA="${{ github.event.workflow_run.head_sha }}"
+          PR_NUM=$(gh api "repos/$REPO/pulls?state=open&per_page=50" \
+            --jq ".[] | select(.head.sha == \"$HEAD_SHA\") | .number" 2>/dev/null | head -1)
+          if [ -z "$PR_NUM" ]; then
+            echo "No open PR for SHA $HEAD_SHA"
+            echo "pr_found=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          echo "Found PR #$PR_NUM"
+          echo "pr_num=$PR_NUM" >> $GITHUB_OUTPUT
+          echo "pr_found=true" >> $GITHUB_OUTPUT
+
+      - name: Check approval
+        id: check_approval
+        if: steps.find_pr.outputs.pr_found == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.BOT_GITHUB_TOKEN }}
+          AUTHORIZED_APPROVERS: ${{ secrets.AUTHORIZED_APPROVERS }}
+        run: |
+          PR_NUM="${{ steps.find_pr.outputs.pr_num }}"
+          REPO="${{ github.repository }}"
+          APPROVED_BY=$(gh api "repos/$REPO/pulls/$PR_NUM/reviews" \
+            --jq '[.[] | select(.state == "APPROVED")] | last | .user.login' 2>/dev/null)
+          echo "Approved by: $APPROVED_BY"
+          if [ -z "$APPROVED_BY" ] || [ "$APPROVED_BY" = "null" ]; then
+            echo "No approval yet"; echo "approved=false" >> $GITHUB_OUTPUT; exit 0
+          fi
+          if [ -z "$AUTHORIZED_APPROVERS" ]; then
+            echo "No AUTHORIZED_APPROVERS set — accepting any approval"
+            echo "approved=true" >> $GITHUB_OUTPUT
+            echo "approver=$APPROVED_BY" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          if echo "$AUTHORIZED_APPROVERS" | tr ',' '\n' | grep -qx "$APPROVED_BY"; then
+            echo "approved=true" >> $GITHUB_OUTPUT
+            echo "approver=$APPROVED_BY" >> $GITHUB_OUTPUT
+          else
+            echo "$APPROVED_BY not authorized"
+            echo "approved=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Pre-merge comment
+        if: steps.check_approval.outputs.approved == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.BOT_GITHUB_TOKEN }}
+        run: |
+          gh pr comment ${{ steps.find_pr.outputs.pr_num }} \
+            --repo ${{ github.repository }} \
+            --body "✅ **Approved by @${{ steps.check_approval.outputs.approver }}**. Claude Code bot is merging now."
+
+      - name: Execute merge
+        if: steps.check_approval.outputs.approved == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.BOT_GITHUB_TOKEN }}
+        run: |
+          PR_NUM="${{ steps.find_pr.outputs.pr_num }}"
+          TITLE=$(gh pr view $PR_NUM --repo ${{ github.repository }} --json title -q .title)
+          gh pr merge $PR_NUM \
+            --repo ${{ github.repository }} \
+            --squash --delete-branch \
+            --subject "${TITLE} [merged by Claude Code bot]"
+          echo "Merged PR #$PR_NUM"
+
+      - name: Merge confirmation comment
+        if: steps.check_approval.outputs.approved == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.BOT_GITHUB_TOKEN }}
+        run: |
+          gh pr comment ${{ steps.find_pr.outputs.pr_num }} \
+            --repo ${{ github.repository }} \
+            --body "🎉 **Merged to \`main\` by Claude Code bot.**
+          Approver: @${{ steps.check_approval.outputs.approver }} | Human pushed to main: ❌" || true
