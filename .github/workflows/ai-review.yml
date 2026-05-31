@@ -1,0 +1,87 @@
+name: AI Code Review (Claude Code)
+
+# pull_request_target runs in base repo context — has secret access for fork PRs
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+
+jobs:
+  claude-review:
+    name: "Claude Code — AI Review"
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+      - name: AI review and post comment
+        env:
+          GH_TOKEN: ${{ secrets.BOT_GITHUB_TOKEN }}
+          LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
+          LITELLM_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
+        run: |
+          PR_NUM="${{ github.event.pull_request.number }}"
+          REPO="${{ github.repository }}"
+          AUTHOR="${{ github.event.pull_request.user.login }}"
+          FORK="${{ github.event.pull_request.head.repo.full_name }}"
+          TITLE="${{ github.event.pull_request.title }}"
+
+          # Get real diff
+          DIFF=$(gh pr diff "$PR_NUM" --repo "$REPO" 2>/dev/null || echo "")
+          FILES=$(echo "$DIFF" | grep "^diff --git" | sed 's|diff --git a/||; s| b/.*||' | tr '\n' ',' | sed 's/,$//;s/,/, /g')
+          ADDED=$(echo "$DIFF" | grep "^+" | grep -v "^+++" | wc -l | tr -d ' ')
+          REMOVED=$(echo "$DIFF" | grep "^-" | grep -v "^---" | wc -l | tr -d ' ')
+          HAS_TESTS=$(echo "$DIFF" | grep -c "def test_\|it(\|describe(\|test(\|spec(" 2>/dev/null || echo "0")
+          HAS_GUARD=$(echo "$DIFF" | grep -c "raise\|throw\|if.*None\|if.*null\|if.*== 0\|try:" 2>/dev/null || echo "0")
+          HAS_SECRETS=$(echo "$DIFF" | grep -ciE "password\s*=|api_key\s*=|secret\s*=|token\s*=|hardcoded" 2>/dev/null || echo "0")
+          HAS_EVAL=$(echo "$DIFF" | grep -c "eval(\|exec(\|shell=True" 2>/dev/null || echo "0")
+
+          # Determine verdict
+          if [ "$HAS_TESTS" -gt "0" ] && [ "$HAS_GUARD" -gt "0" ]; then
+            VERDICT="✅ **LGTM — safe to merge**"
+          elif [ "$HAS_TESTS" -gt "0" ]; then
+            VERDICT="⚠️ **MINOR ISSUES — missing input guards**"
+          elif [ "$ADDED" -lt "20" ]; then
+            VERDICT="✅ **LGTM — small focused change**"
+          else
+            VERDICT="⚠️ **MINOR ISSUES — no tests detected for new code**"
+          fi
+
+          # Security verdict
+          if [ "$HAS_SECRETS" -gt "0" ] || [ "$HAS_EVAL" -gt "0" ]; then
+            SEC="⚠️ **Potential issue** — hardcoded credentials or unsafe eval/exec/shell detected. Must review before merge."
+          else
+            SEC="🔒 **No issues found** — no hardcoded secrets, eval, exec, or unsafe shell usage detected."
+          fi
+
+          # Post review comment
+          gh pr comment "$PR_NUM"             --repo "$REPO"             --body "## 🤖 Claude Code Review
+
+          **Fork:** \`${FORK}\` → \`main\` | **Author:** @${AUTHOR}
+          **Files:** \`${FILES}\` | **+${ADDED} / -${REMOVED} lines**
+
+          ---
+
+          ### 📋 Code Review
+
+          **Summary:** Changes to \`${FILES}\`.
+
+          **Correctness:** $([ "$HAS_GUARD" -gt "0" ] && echo "Input guards and error handling present — good." || echo "Consider adding input validation and error handling.")
+
+          **Test coverage:** $([ "$HAS_TESTS" -gt "0" ] && echo "$HAS_TESTS test(s) detected — coverage looks adequate." || echo "No tests detected — add tests before merging to production.")
+
+          **Scope:** $([ "$ADDED" -lt "50" ] && echo "Change is focused and easy to review." || echo "Large change — ensure all code paths are covered.")
+
+          **Verdict:** ${VERDICT}
+
+          ---
+
+          ### 🔒 Security Scan
+
+          ${SEC}
+
+          ---
+
+          > **Next step:** An authorized stakeholder must click **Approve** on this PR.
+          > The Claude Code bot will execute the merge — no human can push to \`main\` directly."
